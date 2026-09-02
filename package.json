@@ -1,0 +1,27 @@
+{
+  "name": "mon-bilan",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Outil personnel de gestion financière (Église + Commerce) — usage mono-utilisateur, sans authentification",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "icons": "node scripts/generate-icons.mjs",
+    "verify:supabase": "node --env-file=.env scripts/verify-supabase.mjs",
+    "verify:church": "node --env-file=.env scripts/verify-church-flow.mjs",
+    "verify:business": "node --env-file=.env scripts/verify-business-flow.mjs",
+    "verify:excel": "node scripts/verify-excel.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "vite": "^6.3.5",
+    "vitest": "^3.2.4"
+  }
+}

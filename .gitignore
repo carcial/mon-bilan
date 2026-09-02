@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+*.local
+
+# Environment (never commit secrets)
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Supabase local
+supabase/.branches
+supabase/.temp
+
+# Test / coverage
+coverage/
+*.xlsx
+
+# Logs
+*.log
+npm-debug.log*

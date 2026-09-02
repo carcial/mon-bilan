@@ -1,0 +1,68 @@
+/* Design tokens — Mon Bilan */
+:root {
+  /* Colors */
+  --color-bg: #fff9f2;
+  --color-surface: #ffffff;
+  --color-primary: #f28c28;
+  --color-primary-soft: #ffe2be;
+  --color-primary-pale: #fff2e2;
+  --color-text: #222222;
+  --color-text-secondary: #68635e;
+  --color-positive: #25835a;
+  --color-negative: #b83a3a;
+  --color-info: #356a8a;
+  --color-border: #eadfd0;
+  --color-border-strong: #d9cbb8;
+  --color-overlay: rgba(34, 34, 34, 0.45);
+  --color-focus: #c56a12;
+
+  /* Typography */
+  --font-display: "Fraunces", "Georgia", serif;
+  --font-body: "DM Sans", system-ui, sans-serif;
+  --text-xs: 0.875rem;
+  --text-sm: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.375rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.125rem;
+  --text-3xl: 2.5rem;
+  --text-amount: clamp(1.75rem, 5vw, 2.5rem);
+  --line-tight: 1.2;
+  --line-normal: 1.45;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* Layout */
+  --radius-sm: 0.75rem;
+  --radius-md: 1.25rem;
+  --radius-lg: 1.75rem;
+  --radius-pill: 999px;
+  --touch-min: 48px;
+  --nav-height: 4.5rem;
+  --content-max: 40rem;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+
+  /* Elevation */
+  --shadow-card: 0 8px 24px rgba(88, 55, 20, 0.06);
+  --shadow-nav: 0 -4px 24px rgba(88, 55, 20, 0.08);
+  --shadow-modal: 0 16px 48px rgba(34, 34, 34, 0.18);
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+}
