@@ -17,6 +17,8 @@ import {
 import { displayDateFr } from "../../utils/dates.js";
 import {
   annotatePaymentRunningBalances,
+  customerDueExport,
+  latestIsoDate,
   paymentMethodLabel,
   shortRef,
 } from "../../utils/excel-export-map.js";
@@ -247,6 +249,7 @@ async function getBusinessExportData(range, generatedAt, periodKind) {
       payables: business.payables || [],
       customers: (customers || []).map((customer) => {
         const row = receivableByCustomer.get(customer.id);
+        const due = customerDueExport(row?.dueSale);
         return {
           id: customer.id,
           name: customer.name,
@@ -255,6 +258,12 @@ async function getBusinessExportData(range, generatedAt, periodKind) {
           purchases: row?.purchases ?? 0,
           paid: row?.paid ?? 0,
           outstanding: row?.outstanding ?? 0,
+          lastOperation: latestIsoDate([
+            ...(row?.sales || []).map((sale) => sale.sale_date),
+            row?.lastPayment?.payment_date,
+          ]),
+          nextDueDate: due.dueDate,
+          nextDueLabel: due.dueLabel,
         };
       }),
       suppliers: (suppliers || []).map((supplier) => {
@@ -267,22 +276,32 @@ async function getBusinessExportData(range, generatedAt, periodKind) {
           merchandise: row?.merchandise ?? 0,
           paid: row?.paid ?? 0,
           outstanding: row?.outstanding ?? 0,
+          arrivalCount: row?.arrivals?.length ?? 0,
+          lastOperation: latestIsoDate([
+            ...(row?.arrivals || []).map((arrival) => arrival.arrival_date),
+          ]),
         };
       }),
       expenses: (expenses || [])
         .filter((row) => !row.is_arrival_cost_allocation)
-        .map((row) => ({
-          id: row.id,
-          date: row.expense_date,
-          category: EXPENSE_CATEGORY_LABELS[row.category] || row.category,
-          amount: row.amount_fcfa,
-          reason: row.description,
-          relatedLabel: row.arrival_id
-            ? arrivalRefById.get(row.arrival_id) || shortRef(row.arrival_id)
-            : "—",
-          note: row.note,
-          reference: shortRef(row.id),
-        })),
+        .map((row) => {
+          const arrival = (allArrivals || []).find((item) => item.id === row.arrival_id);
+          return {
+            id: row.id,
+            date: row.expense_date,
+            category: EXPENSE_CATEGORY_LABELS[row.category] || row.category,
+            amount: row.amount_fcfa,
+            reason: row.description,
+            supplierName: arrival
+              ? supplierDisplayLabel(arrival.suppliers) || arrival.suppliers?.name
+              : "",
+            relatedLabel: row.arrival_id
+              ? arrivalRefById.get(row.arrival_id) || shortRef(row.arrival_id)
+              : "—",
+            note: row.note,
+            reference: shortRef(row.id),
+          };
+        }),
       allArrivals,
       arrivalInventory,
       stock: business.inventory || [],

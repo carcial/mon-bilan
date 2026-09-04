@@ -215,7 +215,7 @@ function businessFixture(overrides = {}) {
           purchases: 155000,
           paid: 50000,
           outstanding: 105000,
-          remainders: [{ saleId: sale.id, saleDate: "2026-09-02", remaining: 105000, sale }],
+          remainders: [{ saleId: sale.id, saleDate: "2026-09-02", remaining: 105000, total: 155000, sale }],
           dueSale: sale,
         },
       ],
@@ -276,6 +276,8 @@ function businessFixture(overrides = {}) {
           products: { name: "Pommes", unit_type: "sac" },
           quantity_received: 30,
           supplier_unit_price_fcfa: 25000,
+          advance_paid_fcfa: 200000,
+          expenses_owed_to_supplier: false,
         },
       ],
       arrivalInventory: [
@@ -293,6 +295,30 @@ function businessFixture(overrides = {}) {
     "business",
   );
 }
+
+describe("register columns stay classic and complete", () => {
+  it("uses simple résumé columns and per-operation registers", () => {
+    const workbook = businessFixture();
+    const resume = workbook.sheets.find((sheet) => sheet.name === "Résumé");
+    expect(resume.headers).toEqual(["Indicateur", "Valeur", "Commentaire"]);
+    expect(resume.hideTechnicalId).toBe(false);
+
+    const ventes = workbook.sheets.find((sheet) => sheet.name === "Ventes");
+    expect(ventes.rows).toHaveLength(1);
+    expect(ventes.tableName).toBe("Commerce_Ventes");
+
+    const clients = workbook.sheets.find((sheet) => sheet.name === "Clients");
+    expect(clients.headers).toEqual(expect.arrayContaining([
+      "Nom",
+      "Téléphone",
+      "Total achats",
+      "Reste à recevoir",
+      "Dernière opération",
+      "Prochaine échéance",
+      "Identifiant technique",
+    ]));
+  });
+});
 
 describe("excel workbook sheets", () => {
   it("builds the commerce backup sheets in a stable order", () => {
@@ -372,14 +398,14 @@ describe("commerce summary uses canonical totals", () => {
     });
 
     expect(summaryValue(workbook, "Chiffre d'affaires")).toBe(totals.revenue);
-    expect(summaryValue(workbook, "Montant fournisseur (quantité vendue)")).toBe(totals.cogs);
+    expect(summaryValue(workbook, "Montant fournisseur")).toBe(totals.cogs);
     expect(summaryValue(workbook, "Marge estimée")).toBe(totals.grossMargin);
     expect(summaryValue(workbook, "Dépenses")).toBe(totals.operatingExpenses);
     expect(summaryValue(workbook, "Bénéfice estimé")).toBe(totals.estimatedProfit);
     expect(summaryValue(workbook, "Paiements reçus")).toBe(totals.cashCollected);
-    expect(summaryValue(workbook, "À recevoir (état actuel)")).toBe(105000);
-    expect(summaryValue(workbook, "À payer (état actuel)")).toBe(550000);
-    expect(summaryValue(workbook, "Stock (unités actuelles)")).toBe(18);
+    expect(summaryValue(workbook, "À recevoir")).toBe(105000);
+    expect(summaryValue(workbook, "À payer fournisseurs")).toBe(550000);
+    expect(summaryValue(workbook, "Stock actuel")).toBe(18);
   });
 });
 
@@ -391,33 +417,43 @@ describe("commerce transaction coverage", () => {
     expect(ventes.rows[0][0]).toEqual({ kind: "date", value: "2026-09-02" });
     expect(ventes.rows[0][2].value).toBe("Maman Jeanne");
     expect(ventes.rows[0][5]).toEqual({ kind: "int", value: 5 });
-    expect(ventes.rows[0][7]).toEqual({ kind: "money", value: 155000 });
+    expect(ventes.rows[0][6]).toEqual({ kind: "money", value: 25000 });
+    expect(ventes.rows[0][8]).toEqual({ kind: "money", value: 155000 });
     expect(ventes.rows[0][9]).toEqual({ kind: "money", value: 125000 });
     expect(ventes.rows[0][10]).toEqual({ kind: "money", value: 30000 });
-    expect(ventes.totals[0].value).toBe("TOTAL VENTES");
-    expect(ventes.totals[7].value).toBe(155000);
+    expect(ventes.headers).toEqual(expect.arrayContaining([
+      "Date",
+      "Référence",
+      "Client",
+      "Produit",
+      "Montant fournisseur par unité",
+      "Prix de vente par unité",
+      "Total vente",
+      "Identifiant technique",
+    ]));
   });
 
   it("keeps customer payments individually traceable", () => {
     const workbook = businessFixture();
     const sheet = workbook.sheets.find((s) => s.name === "Paiements clients");
     expect(sheet.rows).toHaveLength(1);
-    expect(sheet.rows[0][2]).toEqual({ kind: "money", value: 40000 });
+    expect(sheet.rows[0][3]).toEqual({ kind: "money", value: 40000 });
     expect(sheet.rows[0][5]).toEqual({ kind: "money", value: 145000 });
     expect(sheet.rows[0][6]).toEqual({ kind: "money", value: 105000 });
-    expect(sheet.totals[0].value).toBe("TOTAL PAIEMENTS");
+    expect(sheet.headers[0]).toBe("Date");
+    expect(sheet.headers[1]).toBe("Référence");
   });
 
   it("totals current customer debts and supplier liabilities", () => {
     const workbook = businessFixture();
     const receivables = workbook.sheets.find((s) => s.name === "Clients à recevoir");
     const payables = workbook.sheets.find((s) => s.name === "Fournisseurs à payer");
-    expect(receivables.rows[0][3]).toEqual({ kind: "money", value: 105000 });
-    expect(receivables.totals[0].value).toBe("TOTAL À RECEVOIR");
-    expect(receivables.totals[3].value).toBe(105000);
-    expect(payables.rows[0][5]).toEqual({ kind: "money", value: 550000 });
-    expect(payables.totals[0].value).toBe("TOTAL À PAYER");
-    expect(payables.totals[5].value).toBe(550000);
+    expect(receivables.rows).toHaveLength(1);
+    expect(receivables.rows[0][1].value).toBe("Maman Jeanne");
+    expect(receivables.rows[0][5]).toEqual({ kind: "money", value: 105000 });
+    expect(payables.rows).toHaveLength(1);
+    expect(payables.rows[0][1].value).toBe("SOA");
+    expect(payables.rows[0][9]).toEqual({ kind: "money", value: 550000 });
   });
 
   it("exports arrival-level stock from canonical inventory quantities", () => {
@@ -428,6 +464,7 @@ describe("commerce transaction coverage", () => {
     expect(stock.rows[0][5]).toEqual({ kind: "int", value: 12 });
     expect(stock.rows[0][7]).toEqual({ kind: "int", value: 18 });
     expect(stock.note.toLowerCase()).toContain("actuel");
+    expect(stock.headers[0]).toBe("Date arrivage");
   });
 
   it("shows a clean empty state instead of a broken table", () => {
@@ -448,7 +485,7 @@ describe("commerce transaction coverage", () => {
     const ventes = workbook.sheets.find((s) => s.name === "Ventes");
     expect(ventes.rows).toEqual([]);
     expect(ventes.emptyText).toBe("Aucune donnée pour cette période.");
-    expect(ventes.totals).toBeNull();
+    expect(ventes.rows).toEqual([]);
   });
 });
 
@@ -492,8 +529,8 @@ describe("church summary and movements", () => {
     const income = workbook.sheets.find((s) => s.name === "Entrées");
     expect(income.rows).toHaveLength(1);
     expect(income.rows[0][0]).toEqual({ kind: "date", value: "2026-09-02" });
-    expect(income.rows[0][2]).toEqual({ kind: "money", value: 700000 });
-    expect(income.totals[0].value).toBe("TOTAL ENTRÉES");
+    expect(income.rows[0][3]).toEqual({ kind: "money", value: 700000 });
+    expect(income.headers.slice(0, 6)).toEqual(["Date", "Référence", "Caisse", "Montant", "Motif", "Note"]);
   });
 });
 
@@ -606,13 +643,12 @@ describe("snapshot notes and technical IDs", () => {
     const expected = snapshotStateNote("04/09/2026");
     for (const name of ["Clients à recevoir", "Fournisseurs à payer", "Stock"]) {
       const sheet = workbook.sheets.find((row) => row.name === name);
-      expect(sheet.banner).toBe(expected);
       expect(sheet.note).toBe(expected);
-      expect(sheet.banner).toContain("04/09/2026");
-      expect(sheet.banner).toContain("situation actuelle");
+      expect(sheet.note).toContain("04/09/2026");
+      expect(sheet.note).toContain("situation actuelle");
     }
     const ventes = workbook.sheets.find((row) => row.name === "Ventes");
-    expect(ventes.banner).toBe("");
+    expect(ventes.note).toBe("");
   });
 
   it("keeps the short reference and preserves the full stored identifier", () => {
@@ -653,24 +689,28 @@ describe("written xlsx compatibility", () => {
 
     const resume = workbook.getWorksheet("Résumé");
     const resumeText = resume.getSheetValues().flat().join(" ");
-    expect(resumeText).toContain("Rapport commerce");
+    expect(resumeText).toContain("Indicateur");
     expect(resumeText).toContain("Chiffre d'affaires");
+    expect(Object.keys(resume.tables || {}).length).toBeGreaterThan(0);
 
     const ventes = workbook.getWorksheet("Ventes");
-    const dateCell = ventes.getRow(3).getCell(1);
+    const dateCell = ventes.getRow(2).getCell(1);
     expect(dateCell.numFmt).toBe(DATE_FORMAT);
     expect(formatNumericDateFr(dateCell.value)).toBe("02/09/2026");
 
-    const totalCell = ventes.getRow(3).getCell(8);
+    const totalCell = ventes.getRow(2).getCell(9);
     expect(totalCell.value).toBe(155000);
     expect(totalCell.numFmt).toBe(MONEY_FORMAT);
+    expect(ventes.autoFilter).toBeTruthy();
+    expect(Object.keys(ventes.tables || {}).length).toBeGreaterThan(0);
 
     const stock = workbook.getWorksheet("Stock");
-    expect(String(stock.getRow(2).getCell(1).value || "")).toContain("État actuel au 04/09/2026");
+    const stockValues = stock.getSheetValues().flat().join(" ");
+    expect(stockValues).toContain("État actuel au 04/09/2026");
     const stockIdCol = stock.getColumn(stock.columnCount);
     expect(stockIdCol.hidden).toBe(true);
-    expect(stock.getRow(3).getCell(stock.columnCount).value).toBe(TECHNICAL_ID_HEADER);
-    expect(stock.getRow(4).getCell(stock.columnCount).value).toBe(
+    expect(stock.getRow(1).getCell(stock.columnCount).value).toBe(TECHNICAL_ID_HEADER);
+    expect(stock.getRow(2).getCell(stock.columnCount).value).toBe(
       "eeeeeeee-5555-4000-8000-000000000005",
     );
 
@@ -682,8 +722,9 @@ describe("written xlsx compatibility", () => {
     expect(churchBook.getWorksheet("Résumé").getSheetValues().flat().join(" ")).toContain("Ordinaire");
     const entrees = churchBook.getWorksheet("Entrées");
     expect(entrees.getColumn(entrees.columnCount).hidden).toBe(true);
-    expect(entrees.getRow(3).getCell(entrees.columnCount).value).toBe(
+    expect(entrees.getRow(2).getCell(entrees.columnCount).value).toBe(
       "aaaaaaaa-1111-4000-8000-000000000001",
     );
+    expect(entrees.autoFilter).toBeTruthy();
   });
 });

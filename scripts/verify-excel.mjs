@@ -147,7 +147,7 @@ await verifyWorkbook(businessData, BUSINESS_EXCEL_SHEETS, (workbook) => {
     throw new Error("Business workbook must not include church sheets");
   }
   const sales = workbook.getWorksheet("Ventes");
-  const saleCustomer = String(sales.getRow(3).getCell(3).value || "");
+  const saleCustomer = String(sales.getRow(2).getCell(3).value || "");
   if (!saleCustomer.includes("Jeanne")) {
     throw new Error("Sale row missing customer");
   }

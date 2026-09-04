@@ -384,9 +384,9 @@ describe("cross-screen totals", () => {
     const resume = workbook.sheets[0].rows;
     const valueFor = (label) => resume.find((row) => row[0].value === label)?.[1].value;
     expect(valueFor("Chiffre d'affaires")).toBe(152000);
-    expect(valueFor("Montant fournisseur (quantité vendue)")).toBe(140000);
+    expect(valueFor("Montant fournisseur")).toBe(140000);
     expect(valueFor("Bénéfice estimé")).toBe(7000);
-    expect(valueFor("À recevoir (état actuel)")).toBe(102000);
+    expect(valueFor("À recevoir")).toBe(102000);
   });
 });
 

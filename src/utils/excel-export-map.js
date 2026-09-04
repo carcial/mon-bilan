@@ -8,6 +8,7 @@ import {
   calculateArrivalExpenses,
   calculateLineMargin,
   calculateMerchandiseValue,
+  calculateSupplierObligationBase,
   calculateSupplierOutstanding,
   formatDueExpectation,
   saleItemsTotal,
@@ -42,6 +43,23 @@ export const TECHNICAL_ID_HEADER = "Identifiant technique";
 export function snapshotStateNote(generatedAt) {
   const date = generatedAt ? String(generatedAt) : formatNumericDateFr(new Date());
   return `État actuel au ${date} — cette feuille représente la situation actuelle et non uniquement la période du rapport.`;
+}
+
+export function latestIsoDate(dates = []) {
+  const values = (dates || [])
+    .map((value) => String(value || "").slice(0, 10))
+    .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+  if (!values.length) return null;
+  return values.sort()[values.length - 1];
+}
+
+export function registerTableName(domain, sheetName) {
+  const prefix = domain === "church" ? "Eglise" : "Commerce";
+  const slug = String(sheetName || "Feuille")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^A-Za-z0-9]/g, "");
+  return `${prefix}_${slug || "Feuille"}`;
 }
 
 export function shortRef(id) {
@@ -244,6 +262,7 @@ export function mapSaleExportRows(sales = [], remainderBySaleId = new Map()) {
       remaining,
       paymentMethod: paymentMethodLabel(sale.payment_method),
       dueType: dueTypeLabel(sale.repayment_expectation),
+      dueDate: due.date || null,
       dueLabel:
         due.kind === "exact" && due.date
           ? formatNumericDateFr(due.date)
@@ -276,12 +295,21 @@ export function mapArrivalExportRows(arrivals = [], payments = []) {
       unloading: row.unloading_fcfa,
       other: row.other_expenses_fcfa,
     });
+    const linkedPayments = paymentsByArrival.get(row.id) || 0;
+    const owedToSupplier = Boolean(row.expenses_owed_to_supplier);
+    const feesOwed = owedToSupplier ? fees : 0;
+    const obligation = calculateSupplierObligationBase({
+      merchandiseValue: merchandise,
+      arrivalExpenses: fees,
+      expensesOwedToSupplier: owedToSupplier,
+    });
+    const paid = toFcfaInteger(row.advance_paid_fcfa) + linkedPayments;
     const remaining = calculateSupplierOutstanding({
       merchandiseValue: merchandise,
       advancePaid: row.advance_paid_fcfa,
-      paymentsTotal: paymentsByArrival.get(row.id) || 0,
+      paymentsTotal: linkedPayments,
       arrivalExpenses: fees,
-      expensesOwedToSupplier: Boolean(row.expenses_owed_to_supplier),
+      expensesOwedToSupplier: owedToSupplier,
     });
     return {
       id: row.id,
@@ -299,8 +327,11 @@ export function mapArrivalExportRows(arrivals = [], payments = []) {
       transport_fcfa: toFcfaInteger(row.transport_fcfa),
       unloading_fcfa: toFcfaInteger(row.unloading_fcfa),
       other_expenses_fcfa: toFcfaInteger(row.other_expenses_fcfa),
-      expensesOwedToSupplier: Boolean(row.expenses_owed_to_supplier),
+      expensesOwedToSupplier: owedToSupplier,
+      feesOwed,
+      obligation,
       advance_paid_fcfa: toFcfaInteger(row.advance_paid_fcfa),
+      paid,
       remaining,
       note: row.note || "",
     };
@@ -357,6 +388,62 @@ export function mapPayableExportRows(payables = []) {
     });
 }
 
+export function mapCustomerDebtExportRows(receivables = [], today = todayIso()) {
+  const rows = [];
+  for (const customer of receivables || []) {
+    const remainders = (customer.remainders || []).filter(
+      (row) => toFcfaInteger(row.remaining) > 0,
+    );
+    if (remainders.length) {
+      for (const rem of remainders) {
+        const sale = rem.sale || {};
+        const due = customerDueExport(sale, today);
+        const total = toFcfaInteger(rem.total ?? saleItemsTotal(sale));
+        const remaining = toFcfaInteger(rem.remaining);
+        rows.push({
+          id: rem.saleId || sale.id || null,
+          sale_date: rem.saleDate || sale.sale_date || null,
+          customerName: customer.customer?.name || customer.name || "Client",
+          reference: shortRef(rem.saleId || sale.id),
+          total,
+          paid: Math.max(0, total - remaining),
+          remaining,
+          dueType: dueTypeLabel(sale.repayment_expectation),
+          dueDate: due.dueDate,
+          dueLabel: due.dueLabel,
+          status: due.status,
+          note: sale.note || customer.note || "",
+        });
+      }
+      continue;
+    }
+    if (toFcfaInteger(customer.outstanding) > 0) {
+      const due = customerDueExport(customer.dueSale, today);
+      rows.push({
+        id: customer.dueSale?.id || customer.id || null,
+        sale_date: oldestUnpaidSaleDate(customer.remainders) || customer.oldestUnpaid || null,
+        customerName: customer.customer?.name || customer.name || "Client",
+        reference: shortRef(customer.dueSale?.id),
+        total: toFcfaInteger(customer.purchases),
+        paid: toFcfaInteger(customer.paid),
+        remaining: toFcfaInteger(customer.outstanding),
+        dueType: dueTypeLabel(customer.dueSale?.repayment_expectation),
+        dueDate: due.dueDate,
+        dueLabel: due.dueLabel,
+        status: due.status,
+        note: customer.customer?.note || customer.note || "",
+      });
+    }
+  }
+  return rows;
+}
+
+export function mapSupplierDebtExportRows(arrivals = [], payments = []) {
+  return mapArrivalExportRows(arrivals, payments).filter(
+    (row) => toFcfaInteger(row.remaining) > 0,
+  );
+}
+
 export function mapStockExportRows(arrivals = [], arrivalInventory = [], productInventory = []) {
   const invByArrival = new Map(
     (arrivalInventory || []).map((row) => [row.arrival_id, row]),
@@ -375,9 +462,7 @@ export function mapStockExportRows(arrivals = [], arrivalInventory = [], product
       return {
         id: arrival.id || null,
         productName: arrival.products?.name || "Produit",
-        lotLabel: arrival.arrival_date
-          ? `${formatNumericDateFr(arrival.arrival_date)} · ${shortRef(arrival.id)}`
-          : shortRef(arrival.id),
+        lotLabel: shortRef(arrival.id),
         supplierName: supplierDisplayLabel(arrival.suppliers) || "Fournisseur",
         arrival_date: arrival.arrival_date,
         quantity_received: received,

@@ -1,5 +1,5 @@
 /**
- * Excel workbook structure — one domain per workbook.
+ * Excel workbook structure — one domain per workbook, classic register layout.
  * Values are precomputed by canonical calc helpers; this file only layouts cells.
  */
 
@@ -10,12 +10,13 @@ import {
   excelFilename as buildExcelFilename,
   historyTypeLabel,
   mapArrivalExportRows,
-  mapPayableExportRows,
-  mapReceivableExportRows,
+  mapCustomerDebtExportRows,
   mapSaleExportRows,
   mapStockExportRows,
+  mapSupplierDebtExportRows,
   pickChurchFund,
   churchFundPeriodTotals,
+  registerTableName,
   snapshotStateNote,
 } from "./excel-export-map.js";
 import { formatFcfa } from "./money.js";
@@ -34,14 +35,14 @@ export const BUSINESS_EXCEL_SHEETS = [
   "Résumé",
   "Ventes",
   "Paiements clients",
+  "Clients",
   "Clients à recevoir",
   "Arrivages",
   "Paiements fournisseurs",
+  "Fournisseurs",
   "Fournisseurs à payer",
   "Dépenses",
   "Stock",
-  "Clients",
-  "Fournisseurs",
 ];
 
 /** @deprecated Combined list kept for older tests; new exports are domain-scoped. */
@@ -69,16 +70,20 @@ function optionalMoneyCell(value) {
   return moneyCell(value);
 }
 
+function dueDateCell(row) {
+  if (row?.dueDate) return dateCell(row.dueDate);
+  return textCell(row?.dueLabel || "—");
+}
+
 function technicalIdCell(id) {
   if (id == null || id === "") return textCell("—");
   return { kind: "text", value: String(id) };
 }
 
-function withTechnicalId(headers, rows, totals, ids) {
+function withTechnicalId(headers, rows, ids) {
   return {
     headers: [...headers, TECHNICAL_ID_HEADER],
     rows: rows.map((row, index) => [...row, technicalIdCell(ids[index])]),
-    totals: totals ? [...totals, textCell("")] : null,
   };
 }
 
@@ -86,18 +91,16 @@ function tableSheet(name, headers, rows, options = {}) {
   const empty = !rows.length;
   const ids = options.ids || [];
   const withIds = options.technicalIds === false
-    ? { headers, rows, totals: options.totals || null }
-    : withTechnicalId(headers, empty ? [] : rows, empty ? null : options.totals || null, ids);
+    ? { headers, rows }
+    : withTechnicalId(headers, empty ? [] : rows, ids);
   return {
     name,
     kind: "table",
-    title: options.title || name,
+    tableName: options.tableName || registerTableName(options.domain || "business", name),
     headers: withIds.headers,
     rows: empty ? [] : withIds.rows,
     emptyText: options.emptyText || EMPTY_PERIOD_MESSAGE,
-    totals: empty ? null : withIds.totals,
     note: options.note || "",
-    banner: options.banner || "",
     snapshot: Boolean(options.snapshot),
     hideTechnicalId: options.technicalIds !== false,
   };
@@ -174,14 +177,12 @@ export function buildExcelWorkbookData(data, domain = "business") {
   };
 }
 
-function summaryItem(label, cell, emphasize = false) {
-  return { label, cell, emphasize };
-}
-
-function summaryRowsFromSections(sections) {
-  return sections.flatMap((section) =>
-    section.items.map((item) => [textCell(item.label), item.cell]),
-  );
+function resumeRows(items) {
+  return items.map(([label, cell, comment]) => [
+    textCell(label),
+    cell,
+    textCell(comment || ""),
+  ]);
 }
 
 function churchSheets(data, rangeLabel) {
@@ -192,56 +193,42 @@ function churchSheets(data, rangeLabel) {
   const works = churchFundPeriodTotals(
     pickChurchFund(byFund, /travaux|works|œuvre|oeuvre/i) || data.church.works,
   );
+  const periodComment = "Période du rapport";
+  const snapshotComment = "Solde actuel";
 
-  const sections = [
-    {
-      title: "Ordinaire",
-      items: [
-        summaryItem("Ordinaire — Entrées", moneyCell(ordinary.incomeTotal)),
-        summaryItem("Ordinaire — Sorties", moneyCell(ordinary.expenseTotal)),
-        summaryItem("Ordinaire — Solde", moneyCell(ordinary.endingBalance), true),
-      ],
-    },
-    {
-      title: "Travaux",
-      items: [
-        summaryItem("Travaux — Entrées", moneyCell(works.incomeTotal)),
-        summaryItem("Travaux — Sorties", moneyCell(works.expenseTotal)),
-        summaryItem("Travaux — Solde", moneyCell(works.endingBalance), true),
-      ],
-    },
-    {
-      title: "Ensemble de l’église",
-      items: [
-        summaryItem("Entrées", moneyCell(data.church.incomeTotal), true),
-        summaryItem("Sorties", moneyCell(data.church.expenseTotal), true),
-        summaryItem("Variation", moneyCell(data.church.variation)),
-        summaryItem("Solde", moneyCell(data.church.endingBalance), true),
-        data.church.lastReconciliationDifference == null
-          ? summaryItem("Dernier écart de caisse", textCell("Aucune vérification"))
-          : summaryItem(
-              "Dernier écart de caisse",
-              moneyCell(data.church.lastReconciliationDifference),
-            ),
-      ],
-    },
-  ];
+  const resume = resumeRows([
+    ["Période", textCell(rangeLabel), ""],
+    ["Fichier généré le", textCell(data.generatedAt), ""],
+    ["Ordinaire — Entrées", moneyCell(ordinary.incomeTotal), periodComment],
+    ["Ordinaire — Sorties", moneyCell(ordinary.expenseTotal), periodComment],
+    ["Ordinaire — Solde", moneyCell(ordinary.endingBalance), snapshotComment],
+    ["Travaux — Entrées", moneyCell(works.incomeTotal), periodComment],
+    ["Travaux — Sorties", moneyCell(works.expenseTotal), periodComment],
+    ["Travaux — Solde", moneyCell(works.endingBalance), snapshotComment],
+    ["Entrées", moneyCell(data.church.incomeTotal), periodComment],
+    ["Sorties", moneyCell(data.church.expenseTotal), periodComment],
+    ["Variation", moneyCell(data.church.variation), periodComment],
+    ["Solde", moneyCell(data.church.endingBalance), snapshotComment],
+    data.church.lastReconciliationDifference == null
+      ? ["Dernier écart de caisse", textCell("Aucune vérification"), ""]
+      : ["Dernier écart de caisse", moneyCell(data.church.lastReconciliationDifference), ""],
+  ]);
 
   const incomeRows = (data.churchIncome || []).map((row) => [
     dateCell(row.transaction_date),
+    textCell(row.reference || shortOrDash(row.id)),
     textCell(row.church_funds?.name || row.fundName),
     moneyCell(row.amount_fcfa ?? row.amount),
     textCell(row.reason),
     textCell(row.note),
-    textCell(row.reference || shortOrDash(row.id)),
   ]);
   const expenseRows = (data.churchExpense || []).map((row) => [
     dateCell(row.transaction_date),
+    textCell(row.reference || shortOrDash(row.id)),
     textCell(row.church_funds?.name || row.fundName),
     moneyCell(row.amount_fcfa ?? row.amount),
     textCell(row.reason),
     textCell(row.note),
-    textCell(row.reference || shortOrDash(row.id)),
   ]);
   const fundRows = (data.churchFunds || []).map((row) => [
     textCell(row.name || row.fund?.name),
@@ -250,7 +237,6 @@ function churchSheets(data, rangeLabel) {
     moneyCell(row.incomeTotal),
     moneyCell(row.expenseTotal),
     moneyCell(row.endingBalance ?? row.balance),
-    textCell(row.reference || shortOrDash(row.id || row.fund?.id)),
   ]);
   const reconRows = (data.churchReconciliations || []).map((row) => [
     dateCell(String(row.reconciled_at || "").slice(0, 10)),
@@ -259,71 +245,40 @@ function churchSheets(data, rangeLabel) {
     moneyCell(row.actual_cash_fcfa),
     moneyCell(row.difference_fcfa),
     textCell(row.note),
-    textCell(row.reference || shortOrDash(row.id)),
   ]);
   const historyRows = (data.churchHistory || []).map((row) => [
     dateCell(row.date),
+    textCell(row.reference || shortOrDash(row.sourceId || row.id)),
     textCell(historyTypeLabel(row.type) || row.typeLabel),
     textCell(row.subtitle || row.fundName),
     row.amount == null ? textCell("—") : moneyCell(row.amount),
     textCell(row.title || row.reason),
     textCell(row.note),
-    textCell(row.reference || shortOrDash(row.sourceId || row.id)),
   ]);
 
   return [
-    {
-      name: "Résumé",
-      kind: "summary",
-      headers: ["Libellé", "Valeur"],
-      workbookTitle: "Mon Bilan",
-      reportTitle: "Rapport église",
-      periodLabel: rangeLabel,
-      generatedAt: data.generatedAt,
-      sections,
-      rows: summaryRowsFromSections(sections),
-    },
+    tableSheet("Résumé", ["Indicateur", "Valeur", "Commentaire"], resume, {
+      domain: "church",
+      technicalIds: false,
+    }),
     tableSheet(
       "Entrées",
-      ["Date", "Caisse", "Montant FCFA", "Motif", "Note", "Référence"],
+      ["Date", "Référence", "Caisse", "Montant", "Motif", "Note"],
       incomeRows,
-      {
-        ids: (data.churchIncome || []).map((row) => row.id),
-        totals: incomeRows.length
-          ? [
-              textCell("TOTAL ENTRÉES"),
-              textCell(""),
-              moneyCell(sumMoney(incomeRows, 2)),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-            ]
-          : null,
-      },
+      { domain: "church", ids: (data.churchIncome || []).map((row) => row.id) },
     ),
     tableSheet(
       "Sorties",
-      ["Date", "Caisse", "Montant FCFA", "Motif", "Note", "Référence"],
+      ["Date", "Référence", "Caisse", "Montant", "Motif", "Note"],
       expenseRows,
-      {
-        ids: (data.churchExpense || []).map((row) => row.id),
-        totals: expenseRows.length
-          ? [
-              textCell("TOTAL SORTIES"),
-              textCell(""),
-              moneyCell(sumMoney(expenseRows, 2)),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-            ]
-          : null,
-      },
+      { domain: "church", ids: (data.churchExpense || []).map((row) => row.id) },
     ),
     tableSheet(
       "Caisses",
-      ["Caisse", "Code", "Solde d’ouverture", "Entrées période", "Sorties période", "Solde", "Référence"],
+      ["Caisse", "Code", "Solde d’ouverture", "Entrées période", "Sorties période", "Solde"],
       fundRows,
       {
+        domain: "church",
         ids: (data.churchFunds || []).map((row) => row.id || row.fund?.id),
         emptyText: "Aucune caisse enregistrée.",
         snapshot: true,
@@ -332,25 +287,23 @@ function churchSheets(data, rangeLabel) {
     ),
     tableSheet(
       "Vérifications de caisse",
-      ["Date", "Caisse", "Théorique", "Compté", "Écart", "Note", "Référence"],
+      ["Date", "Caisse", "Solde théorique", "Argent compté", "Écart", "Note"],
       reconRows,
-      {
-        ids: (data.churchReconciliations || []).map((row) => row.id),
-      },
+      { domain: "church", ids: (data.churchReconciliations || []).map((row) => row.id) },
     ),
     tableSheet(
       "Historique",
-      ["Date", "Type", "Caisse", "Montant FCFA", "Libellé", "Note", "Référence"],
+      ["Date", "Référence", "Type", "Caisse", "Montant", "Libellé", "Note"],
       historyRows,
-      {
-        ids: (data.churchHistory || []).map((row) => row.sourceId || row.id),
-      },
+      { domain: "church", ids: (data.churchHistory || []).map((row) => row.sourceId || row.id) },
     ),
   ];
 }
 
-function businessSheets(data, rangeLabel) {
+function businessSheets(data) {
   const currentStateNote = snapshotStateNote(data.generatedAt);
+  const periodComment = "Période du rapport";
+  const snapshotComment = "État actuel";
   const sales = mapSaleExportRows(data.sales || [], data.remainderBySaleId || new Map());
   const saleRows = sales.map((row) => [
     dateCell(row.sale_date),
@@ -359,9 +312,9 @@ function businessSheets(data, rangeLabel) {
     textCell(row.productName),
     textCell(row.lotLabel),
     intCell(row.quantity),
+    optionalMoneyCell(row.supplierUnitPrice),
     optionalMoneyCell(row.saleUnitPrice),
     moneyCell(row.total),
-    optionalMoneyCell(row.supplierUnitPrice),
     moneyCell(row.supplierAmount),
     moneyCell(row.margin),
     textCell(row.paymentStatus),
@@ -369,32 +322,33 @@ function businessSheets(data, rangeLabel) {
     moneyCell(row.remaining),
     textCell(row.paymentMethod),
     textCell(row.dueType),
-    textCell(row.dueLabel),
+    dueDateCell(row),
     textCell(row.note),
   ]);
 
   const paymentRows = (data.customerPayments || []).map((row) => [
     dateCell(row.payment_date || row.date),
+    textCell(row.reference || shortOrDash(row.id)),
     textCell(row.customerName || row.customers?.name),
     moneyCell(row.amount_fcfa ?? row.amount),
     textCell(row.paymentMethodLabel || row.payment_method || "—"),
-    textCell(row.saleReference || "—"),
     row.previousOutstanding == null ? textCell("—") : moneyCell(row.previousOutstanding),
     row.remainingAfter == null ? textCell("—") : moneyCell(row.remainingAfter),
+    textCell(row.saleReference || "—"),
     textCell(row.note),
-    textCell(row.reference || shortOrDash(row.id)),
   ]);
 
-  const receivables = mapReceivableExportRows(data.receivables || []);
-  const receivableRows = receivables.map((row) => [
-    textCell(row.name),
-    moneyCell(row.purchases),
+  const debts = mapCustomerDebtExportRows(data.receivables || []);
+  const debtRows = debts.map((row) => [
+    dateCell(row.sale_date),
+    textCell(row.customerName),
+    textCell(row.reference),
+    moneyCell(row.total),
     moneyCell(row.paid),
-    moneyCell(row.outstanding),
-    dateCell(row.oldestUnpaidSale),
-    textCell(row.dueLabel),
-    textCell(row.dueStatus),
-    textCell(row.phone),
+    moneyCell(row.remaining),
+    textCell(row.dueType),
+    dueDateCell(row),
+    textCell(row.status),
     textCell(row.note),
   ]);
 
@@ -412,55 +366,63 @@ function businessSheets(data, rangeLabel) {
     moneyCell(row.other_expenses_fcfa),
     textCell(row.expensesOwedToSupplier ? "Oui" : "Non"),
     moneyCell(row.advance_paid_fcfa),
+    moneyCell(row.obligation),
     moneyCell(row.remaining),
     textCell(row.note),
   ]);
 
   const supplierPaymentRows = (data.supplierPayments || []).map((row) => [
     dateCell(row.payment_date || row.date),
+    textCell(row.reference || shortOrDash(row.id)),
     textCell(row.supplierName || row.suppliers?.name),
     moneyCell(row.amount_fcfa ?? row.amount),
     textCell(row.paymentMethodLabel || row.payment_method || "—"),
     textCell(row.arrivalReference || "—"),
     textCell(row.note),
-    textCell(row.reference || shortOrDash(row.id)),
   ]);
 
-  const payables = mapPayableExportRows(data.payables || []);
-  const payableRows = payables.map((row) => [
-    textCell(row.name),
+  const supplierDebts = mapSupplierDebtExportRows(
+    data.allArrivals?.length ? data.allArrivals : data.arrivals || [],
+    data.supplierPaymentsAll || [],
+  );
+  const supplierDebtRows = supplierDebts.map((row) => [
+    dateCell(row.arrival_date),
+    textCell(row.supplierName),
+    textCell(row.reference),
+    textCell(row.productName),
+    intCell(row.quantity_received),
     moneyCell(row.merchandise),
     moneyCell(row.feesOwed),
     moneyCell(row.obligation),
     moneyCell(row.paid),
-    moneyCell(row.outstanding),
-    intCell(row.arrivalCount),
+    moneyCell(row.remaining),
+    textCell(row.note),
   ]);
 
   const expenseRows = (data.expenses || []).map((row) => [
     dateCell(row.date || row.expense_date),
+    textCell(row.reference || shortOrDash(row.id)),
     textCell(row.category),
     textCell(row.reason || row.description),
     moneyCell(row.amount ?? row.amount_fcfa),
+    textCell(row.supplierName || "—"),
     textCell(row.relatedLabel || "—"),
     textCell(row.note),
-    textCell(row.reference || shortOrDash(row.id)),
   ]);
 
   const stockSource = (data.stock || []).some((row) => row.lotLabel || row.arrival_date)
     ? data.stock
     : mapStockExportRows(data.allArrivals || [], data.arrivalInventory || [], data.stock || []);
   const stockRows = stockSource.map((row) => [
+    dateCell(row.arrival_date),
+    textCell(row.supplierName || "—"),
     textCell(row.productName || row.product_name),
     textCell(row.lotLabel || "—"),
-    textCell(row.supplierName || "—"),
-    dateCell(row.arrival_date),
     intCell(row.quantity_received),
     intCell(row.quantity_sold),
     intCell(row.quantity_adjustments),
     intCell(row.quantity_available),
     optionalMoneyCell(row.supplier_unit_price_fcfa),
-    textCell(row.unit_type || "sac"),
   ]);
 
   const customerRows = (data.customers || []).map((row) => [
@@ -470,6 +432,8 @@ function businessSheets(data, rangeLabel) {
     moneyCell(row.purchases),
     moneyCell(row.paid),
     moneyCell(row.outstanding),
+    dateCell(row.lastOperation),
+    row.nextDueDate ? dateCell(row.nextDueDate) : textCell(row.nextDueLabel || "—"),
   ]);
 
   const supplierRows = (data.suppliers || []).map((row) => [
@@ -479,52 +443,34 @@ function businessSheets(data, rangeLabel) {
     moneyCell(row.merchandise),
     moneyCell(row.paid),
     moneyCell(row.outstanding),
+    intCell(row.arrivalCount),
+    dateCell(row.lastOperation),
   ]);
 
   const biz = data.business;
-  const sections = [
-    {
-      title: "Résultat de la période",
-      items: [
-        summaryItem("Chiffre d'affaires", moneyCell(biz.revenue), true),
-        summaryItem("Montant fournisseur (quantité vendue)", moneyCell(biz.cogs)),
-        summaryItem(
-          "Marge estimée",
-          moneyCell(biz.grossMargin ?? toFcfaInteger(biz.revenue) - toFcfaInteger(biz.cogs)),
-          true,
-        ),
-        summaryItem("Dépenses", moneyCell(biz.operatingExpenses)),
-        summaryItem("Bénéfice estimé", moneyCell(biz.estimatedProfit), true),
-      ],
-    },
-    {
-      title: "Encaissements et créances",
-      items: [
-        summaryItem("Paiements reçus", moneyCell(biz.cashCollected), true),
-        summaryItem("À recevoir (état actuel)", moneyCell(biz.receivablesTotal), true),
-      ],
-    },
-    {
-      title: "Dettes et stock",
-      items: [
-        summaryItem("À payer (état actuel)", moneyCell(biz.payablesTotal), true),
-        summaryItem("Stock (unités actuelles)", intCell(biz.stockUnits), true),
-      ],
-    },
-  ];
+  const resume = resumeRows([
+    ["Période", textCell(data.periodLabel || ""), ""],
+    ["Fichier généré le", textCell(data.generatedAt), ""],
+    ["Chiffre d'affaires", moneyCell(biz.revenue), periodComment],
+    ["Montant fournisseur", moneyCell(biz.cogs), periodComment],
+    [
+      "Marge estimée",
+      moneyCell(biz.grossMargin ?? toFcfaInteger(biz.revenue) - toFcfaInteger(biz.cogs)),
+      periodComment,
+    ],
+    ["Dépenses", moneyCell(biz.operatingExpenses), periodComment],
+    ["Bénéfice estimé", moneyCell(biz.estimatedProfit), periodComment],
+    ["Paiements reçus", moneyCell(biz.cashCollected), periodComment],
+    ["À recevoir", moneyCell(biz.receivablesTotal), snapshotComment],
+    ["À payer fournisseurs", moneyCell(biz.payablesTotal), snapshotComment],
+    ["Stock actuel", intCell(biz.stockUnits), snapshotComment],
+  ]);
 
   return [
-    {
-      name: "Résumé",
-      kind: "summary",
-      headers: ["Libellé", "Valeur"],
-      workbookTitle: "Mon Bilan",
-      reportTitle: "Rapport commerce",
-      periodLabel: rangeLabel,
-      generatedAt: data.generatedAt,
-      sections,
-      rows: summaryRowsFromSections(sections),
-    },
+    tableSheet("Résumé", ["Indicateur", "Valeur", "Commentaire"], resume, {
+      domain: "business",
+      technicalIds: false,
+    }),
     tableSheet(
       "Ventes",
       [
@@ -532,112 +478,80 @@ function businessSheets(data, rangeLabel) {
         "Référence",
         "Client",
         "Produit",
-        "Lot / arrivage",
+        "Lot / Arrivage",
         "Quantité",
-        "Prix de vente / unité",
+        "Montant fournisseur par unité",
+        "Prix de vente par unité",
         "Total vente",
-        "Montant fournisseur / unité",
-        "Montant fournisseur vendu",
+        "Montant fournisseur total",
         "Marge",
         "Statut paiement",
-        "Payé immédiatement",
-        "Reste dû",
+        "Montant payé immédiatement",
+        "Reste à recevoir",
         "Mode de paiement",
-        "Type d’échéance",
-        "Échéance",
+        "Type échéance",
+        "Date échéance",
         "Note",
       ],
       saleRows,
-      {
-        ids: sales.map((row) => row.id),
-        totals: saleRows.length
-          ? [
-              textCell("TOTAL VENTES"),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              intCell(sales.reduce((sum, row) => sum + toFcfaInteger(row.quantity), 0)),
-              textCell(""),
-              moneyCell(sales.reduce((sum, row) => sum + toFcfaInteger(row.total), 0)),
-              textCell(""),
-              moneyCell(sales.reduce((sum, row) => sum + toFcfaInteger(row.supplierAmount), 0)),
-              moneyCell(sales.reduce((sum, row) => sum + toFcfaInteger(row.margin), 0)),
-              textCell(""),
-              moneyCell(sales.reduce((sum, row) => sum + toFcfaInteger(row.paidImmediately), 0)),
-              moneyCell(sales.reduce((sum, row) => sum + toFcfaInteger(row.remaining), 0)),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-            ]
-          : null,
-      },
+      { domain: "business", ids: sales.map((row) => row.id) },
     ),
     tableSheet(
       "Paiements clients",
       [
         "Date",
+        "Référence",
         "Client",
         "Montant reçu",
         "Mode de paiement",
-        "Vente liée",
-        "Dû avant paiement",
-        "Reste après paiement",
+        "Dette avant",
+        "Dette après",
+        "Vente associée",
         "Note",
-        "Référence",
       ],
       paymentRows,
+      { domain: "business", ids: (data.customerPayments || []).map((row) => row.id) },
+    ),
+    tableSheet(
+      "Clients",
+      [
+        "Nom",
+        "Téléphone",
+        "Note",
+        "Total achats",
+        "Total payé",
+        "Reste à recevoir",
+        "Dernière opération",
+        "Prochaine échéance",
+      ],
+      customerRows,
       {
-        ids: (data.customerPayments || []).map((row) => row.id),
-        totals: paymentRows.length
-          ? [
-              textCell("TOTAL PAIEMENTS"),
-              textCell(""),
-              moneyCell(sumMoney(paymentRows, 2)),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-            ]
-          : null,
+        domain: "business",
+        ids: (data.customers || []).map((row) => row.id),
+        emptyText: "Aucun client enregistré.",
       },
     ),
     tableSheet(
       "Clients à recevoir",
       [
+        "Date vente",
         "Client",
-        "Total achats",
-        "Total payé",
-        "Reste dû",
-        "Plus ancienne vente impayée",
-        "Échéance prévue",
-        "Statut d’échéance",
-        "Téléphone",
+        "Référence vente",
+        "Montant vente",
+        "Payé",
+        "Reste",
+        "Type échéance",
+        "Date échéance",
+        "Statut",
         "Note",
       ],
-      receivableRows,
+      debtRows,
       {
-        ids: receivables.map((row) => row.id),
+        domain: "business",
+        ids: debts.map((row) => row.id),
         snapshot: true,
-        banner: currentStateNote,
         note: currentStateNote,
         emptyText: "Aucune créance client actuellement.",
-        totals: receivableRows.length
-          ? [
-              textCell("TOTAL À RECEVOIR"),
-              moneyCell(sumMoney(receivableRows, 1)),
-              moneyCell(sumMoney(receivableRows, 2)),
-              moneyCell(sumMoney(receivableRows, 3)),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-            ]
-          : null,
       },
     ),
     tableSheet(
@@ -648,162 +562,115 @@ function businessSheets(data, rangeLabel) {
         "Fournisseur",
         "Produit",
         "Quantité reçue",
-        "Montant fournisseur / unité",
-        "Marchandise",
+        "Montant fournisseur par unité",
+        "Montant marchandise",
         "Transport",
         "Déchargement",
         "Autres frais",
-        "Frais dus au fournisseur",
-        "Avance versée",
+        "Frais dus au fournisseur ?",
+        "Avance fournisseur",
+        "Total dû fournisseur",
         "Reste fournisseur",
         "Note",
       ],
       arrivalRows,
-      {
-        ids: arrivals.map((row) => row.id),
-        totals: arrivalRows.length
-          ? [
-              textCell("TOTAL ARRIVAGES"),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              intCell(arrivals.reduce((sum, row) => sum + toFcfaInteger(row.quantity_received), 0)),
-              textCell(""),
-              moneyCell(arrivals.reduce((sum, row) => sum + toFcfaInteger(row.merchandise), 0)),
-              moneyCell(arrivals.reduce((sum, row) => sum + toFcfaInteger(row.transport_fcfa), 0)),
-              moneyCell(arrivals.reduce((sum, row) => sum + toFcfaInteger(row.unloading_fcfa), 0)),
-              moneyCell(arrivals.reduce((sum, row) => sum + toFcfaInteger(row.other_expenses_fcfa), 0)),
-              textCell(""),
-              moneyCell(arrivals.reduce((sum, row) => sum + toFcfaInteger(row.advance_paid_fcfa), 0)),
-              moneyCell(arrivals.reduce((sum, row) => sum + toFcfaInteger(row.remaining), 0)),
-              textCell(""),
-            ]
-          : null,
-      },
+      { domain: "business", ids: arrivals.map((row) => row.id) },
     ),
     tableSheet(
       "Paiements fournisseurs",
-      ["Date", "Fournisseur", "Montant versé", "Mode de paiement", "Arrivage lié", "Note", "Référence"],
+      [
+        "Date",
+        "Référence",
+        "Fournisseur",
+        "Montant payé",
+        "Mode paiement",
+        "Arrivage associé",
+        "Note",
+      ],
       supplierPaymentRows,
+      { domain: "business", ids: (data.supplierPayments || []).map((row) => row.id) },
+    ),
+    tableSheet(
+      "Fournisseurs",
+      [
+        "Nom",
+        "Téléphone",
+        "Note",
+        "Marchandise reçue",
+        "Déjà payé",
+        "Reste à payer",
+        "Nombre d'arrivages",
+        "Dernière opération",
+      ],
+      supplierRows,
       {
-        ids: (data.supplierPayments || []).map((row) => row.id),
-        totals: supplierPaymentRows.length
-          ? [
-              textCell("TOTAL PAIEMENTS"),
-              textCell(""),
-              moneyCell(sumMoney(supplierPaymentRows, 2)),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-            ]
-          : null,
+        domain: "business",
+        ids: (data.suppliers || []).map((row) => row.id),
+        emptyText: "Aucun fournisseur enregistré.",
       },
     ),
     tableSheet(
       "Fournisseurs à payer",
       [
+        "Date",
         "Fournisseur",
-        "Marchandise reçue",
-        "Frais dus au fournisseur",
-        "Obligation totale",
+        "Référence arrivage",
+        "Produit",
+        "Quantité",
+        "Montant marchandise",
+        "Frais dus fournisseur",
+        "Total obligation",
         "Déjà payé",
-        "Reste à payer",
-        "Nombre d’arrivages",
+        "Reste",
+        "Note",
       ],
-      payableRows,
+      supplierDebtRows,
       {
-        ids: payables.map((row) => row.id),
+        domain: "business",
+        ids: supplierDebts.map((row) => row.id),
         snapshot: true,
-        banner: currentStateNote,
         note: currentStateNote,
         emptyText: "Aucune dette fournisseur actuellement.",
-        totals: payableRows.length
-          ? [
-              textCell("TOTAL À PAYER"),
-              moneyCell(sumMoney(payableRows, 1)),
-              moneyCell(sumMoney(payableRows, 2)),
-              moneyCell(sumMoney(payableRows, 3)),
-              moneyCell(sumMoney(payableRows, 4)),
-              moneyCell(sumMoney(payableRows, 5)),
-              textCell(""),
-            ]
-          : null,
       },
     ),
     tableSheet(
       "Dépenses",
-      ["Date", "Catégorie", "Motif", "Montant FCFA", "Arrivage lié", "Note", "Référence"],
+      [
+        "Date",
+        "Référence",
+        "Type / Catégorie",
+        "Motif",
+        "Montant",
+        "Fournisseur lié",
+        "Arrivage lié",
+        "Note",
+      ],
       expenseRows,
-      {
-        ids: (data.expenses || []).map((row) => row.id),
-        totals: expenseRows.length
-          ? [
-              textCell("TOTAL DÉPENSES"),
-              textCell(""),
-              textCell(""),
-              moneyCell(sumMoney(expenseRows, 3)),
-              textCell(""),
-              textCell(""),
-              textCell(""),
-            ]
-          : null,
-      },
+      { domain: "business", ids: (data.expenses || []).map((row) => row.id) },
     ),
     tableSheet(
       "Stock",
       [
-        "Produit",
-        "Arrivage / lot",
+        "Date arrivage",
         "Fournisseur",
-        "Date reçue",
+        "Produit",
+        "Référence lot",
         "Quantité reçue",
         "Quantité vendue",
         "Ajustements",
-        "Disponible",
-        "Montant fournisseur / unité",
-        "Unité",
+        "Quantité disponible",
+        "Montant fournisseur/unité",
       ],
       stockRows,
       {
+        domain: "business",
         ids: stockSource.map((row) => row.id),
         snapshot: true,
-        banner: currentStateNote,
         note: currentStateNote,
         emptyText: "Aucun stock enregistré.",
       },
     ),
-    tableSheet(
-      "Clients",
-      ["Nom", "Téléphone", "Note", "Total achats", "Total payé", "Reste dû"],
-      customerRows,
-      {
-        ids: (data.customers || []).map((row) => row.id),
-        snapshot: true,
-        emptyText: "Aucun client enregistré.",
-        note: "Fiche clients — utile comme sauvegarde manuelle.",
-      },
-    ),
-    tableSheet(
-      "Fournisseurs",
-      ["Nom", "Téléphone", "Note", "Marchandise", "Total payé", "Reste dû"],
-      supplierRows,
-      {
-        ids: (data.suppliers || []).map((row) => row.id),
-        snapshot: true,
-        emptyText: "Aucun fournisseur enregistré.",
-        note: "Fiche fournisseurs — utile comme sauvegarde manuelle.",
-      },
-    ),
   ];
-}
-
-function sumMoney(rows, index) {
-  return rows.reduce((sum, row) => {
-    const cell = row[index];
-    if (!cell || cell.kind !== "money") return sum;
-    return sum + (Number(cell.value) || 0);
-  }, 0);
 }
 
 function shortOrDash(id) {
