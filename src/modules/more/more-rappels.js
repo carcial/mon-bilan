@@ -14,10 +14,12 @@ import {
 import {
   detectWebPushSupport,
   getLocalPushSubscription,
+  inspectConfiguredVapidPublicKey,
   isRappelsWebPushEnabled,
   isWebPushConfigured,
   serializePushSubscription,
   subscribeStandardWebPush,
+  waitForActiveServiceWorker,
 } from "../../push/web-push.js";
 import { ensureServiceWorkerRegistration } from "../../pwa.js";
 import { rappelsViewState } from "../../../supabase/functions/_shared/fcm-auth.js";
@@ -171,7 +173,7 @@ function renderView() {
 }
 
 async function persistWebPushSubscription(subscription) {
-  await upsertWebPushDevice({
+  return upsertWebPushDevice({
     platform: buildTargetPlatform(),
     subscription,
     enabled: true,
@@ -223,19 +225,43 @@ async function onActivateClick() {
       return;
     }
 
-    const registration = await ensureServiceWorkerRegistration();
+    const registration = await waitForActiveServiceWorker(await ensureServiceWorkerRegistration());
     await navigator.serviceWorker.ready;
-    const subscription = await subscribeStandardWebPush({ serviceWorkerRegistration: registration });
+    const { subscription, diagnostics } = await subscribeStandardWebPush({
+      serviceWorkerRegistration: registration,
+    });
     if (!isCompletePushSubscription(serializePushSubscription(subscription))) {
+      console.info("[rappels-register]", {
+        ...diagnostics,
+        vapidPublicPresent: inspectConfiguredVapidPublicKey().present,
+        vapidPublicByteLength: inspectConfiguredVapidPublicKey().byteLength,
+        upsertStatus: null,
+      });
       throw new Error("Impossible d'obtenir un code de notification pour cet appareil.");
     }
 
-    await persistWebPushSubscription(subscription);
+    try {
+      const persisted = await persistWebPushSubscription(subscription);
+      console.info("[rappels-register]", {
+        ...diagnostics,
+        upsertStatus: persisted?._upsertStatus ?? 201,
+      });
+    } catch (upsertErr) {
+      console.info("[rappels-register]", {
+        ...diagnostics,
+        upsertStatus: upsertErr?.httpStatus ?? "error",
+        subscribe: diagnostics?.subscribe || "success",
+      });
+      throw upsertErr;
+    }
     current = await upsertNotificationPreferences({ ...current, enabled: true });
     hasEnabledDevice = true;
     showToast("✓ Rappels activés");
     renderView();
   } catch (err) {
+    if (err?.diagnostics) {
+      console.info("[rappels-register]", err.diagnostics);
+    }
     showToast(friendlyError(err));
     renderView();
   }

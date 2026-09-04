@@ -350,10 +350,11 @@ describe("excel export data structure", () => {
     expect(labels.join(" ")).not.toMatch(/chiffre d'affaires|grand total/i);
 
     const income = workbook.sheets[1].rows[0];
-    expect(income[0].value).toBe("02/09/2026");
-    expect(income[3].kind).toBe("money");
-    expect(income[3].value).toBe(825000);
-    expect(formatFcfa(income[3].value)).toContain("825");
+    expect(income[0].value).toBe("2026-09-02");
+    expect(income[0].kind).toBe("date");
+    expect(income[2].kind).toBe("money");
+    expect(income[2].value).toBe(825000);
+    expect(formatFcfa(income[2].value)).toContain("825");
   });
 });
 

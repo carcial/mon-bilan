@@ -89,9 +89,20 @@ export const PRODUCTION_REMINDER_CRON = {
 };
 
 export const TEMPORARY_SMOKE_CRON = {
-  name: "push-smoke-test-every-minute",
+  name: "webpush-smoke-test-every-minute",
   schedule: "* * * * *",
 };
+
+export const SMOKE_PUSH_MAX_SENDS = 3;
+
+export function buildSmokeDedupKey(localDateISO, now) {
+  const date = now instanceof Date ? now : new Date(now);
+  return `push_smoke_test:${localDateISO}T${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+export function shouldStopSmokeAfterMaxSends(sentCount, maxSends = SMOKE_PUSH_MAX_SENDS) {
+  return Number(sentCount) >= Number(maxSends);
+}
 
 export const TEST_PUSH_COPY = {
   title: "Mon Bilan",

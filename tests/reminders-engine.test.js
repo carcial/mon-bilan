@@ -27,6 +27,8 @@ import {
   TEMPORARY_SMOKE_CRON,
   TEST_PUSH_COPY,
   buildDeepLinkUrl,
+  buildSmokeDedupKey,
+  shouldStopSmokeAfterMaxSends,
   buildEdgeCorsHeaders,
   buildFcmHttpV1Message,
   buildFcmHttpV1SendUrl,
@@ -344,11 +346,20 @@ describe("test-only push without APP_BASE_URL", () => {
 
 describe("temporary smoke cron helper", () => {
   it("keeps the production daily cron unchanged", () => {
-    expect(TEMPORARY_SMOKE_CRON.name).toBe("push-smoke-test-every-minute");
+    expect(TEMPORARY_SMOKE_CRON.name).toBe("webpush-smoke-test-every-minute");
     expect(TEMPORARY_SMOKE_CRON.schedule).toBe("* * * * *");
     expect(PRODUCTION_REMINDER_CRON.name).toBe("send-push-reminders-daily");
     expect(PRODUCTION_REMINDER_CRON.schedule).toBe("0 18 * * *");
     expect(cronMatchesDouala1900(PRODUCTION_REMINDER_CRON.schedule)).toBe(true);
+    expect(TEMPORARY_SMOKE_CRON.name).not.toBe(PRODUCTION_REMINDER_CRON.name);
+  });
+
+  it("uses a per-minute smoke key, not a production reminder dedup key", () => {
+    const key = buildSmokeDedupKey("2026-09-04", new Date("2026-09-04T18:07:00Z"));
+    expect(key).toBe("push_smoke_test:2026-09-04T18:07");
+    expect(key).not.toMatch(/^church_|^business_/);
+    expect(shouldStopSmokeAfterMaxSends(2)).toBe(false);
+    expect(shouldStopSmokeAfterMaxSends(3)).toBe(true);
   });
 });
 

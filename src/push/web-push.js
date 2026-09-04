@@ -1,9 +1,13 @@
 import {
+  applicationServerKeysEqual,
+  buildRegistrationDiagnostics,
   detectWebPushSupport,
-  isCompletePushSubscription,
+  inspectVapidPublicKey,
   isRappelsWebPushEnabled,
   isWebPushPublicKeyConfigured,
+  mapWebPushSubscribeError,
   serializePushSubscription,
+  shouldReuseExistingSubscription,
   vapidPublicKeyToApplicationServerKey,
 } from "../../supabase/functions/_shared/web-push.js";
 
@@ -19,22 +23,16 @@ export function getWebPushPublicKey() {
   return readPublicWebPushKey();
 }
 
-export { detectWebPushSupport, isRappelsWebPushEnabled, serializePushSubscription };
-
-function applicationServerKeysEqual(left, rightKey) {
-  if (!left) return false;
-  try {
-    const expected = vapidPublicKeyToApplicationServerKey(rightKey);
-    const current = left instanceof Uint8Array ? left : new Uint8Array(left);
-    if (current.length !== expected.length) return false;
-    for (let i = 0; i < current.length; i++) {
-      if (current[i] !== expected[i]) return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
+export function inspectConfiguredVapidPublicKey() {
+  return inspectVapidPublicKey(readPublicWebPushKey());
 }
+
+export {
+  detectWebPushSupport,
+  isRappelsWebPushEnabled,
+  serializePushSubscription,
+  shouldReuseExistingSubscription,
+};
 
 export async function getLocalPushSubscription(registration) {
   if (!registration?.pushManager) return null;
@@ -45,30 +43,86 @@ export async function getLocalPushSubscription(registration) {
   }
 }
 
+export async function waitForActiveServiceWorker(registration) {
+  if (registration?.active) return registration;
+  if (typeof navigator === "undefined" || !navigator.serviceWorker) return registration;
+  try {
+    return await navigator.serviceWorker.ready;
+  } catch {
+    return registration;
+  }
+}
+
 export async function subscribeStandardWebPush({ serviceWorkerRegistration }) {
   const support = detectWebPushSupport();
+  const vapidInspect = inspectConfiguredVapidPublicKey();
+  const baseDiag = {
+    permission: typeof Notification !== "undefined" ? Notification.permission : "unsupported",
+    swReady: Boolean(serviceWorkerRegistration?.active),
+    pushManager: Boolean(serviceWorkerRegistration?.pushManager || support.pushManager),
+    existingSubscription: false,
+    vapidInspect,
+    subscribe: { ok: false, name: "pending" },
+    upsert: { status: null },
+  };
+
+  const fail = (message, code, extra = {}) => {
+    const error = new Error(message);
+    error.code = code;
+    error.diagnostics = buildRegistrationDiagnostics({ ...baseDiag, ...extra });
+    throw error;
+  };
+
   if (!support.supported) {
-    throw new Error("Rappels indisponibles sur cet appareil.");
+    fail("Rappels indisponibles sur cet appareil.", "not_supported");
   }
   const publicKey = readPublicWebPushKey();
-  if (!isWebPushPublicKeyConfigured(publicKey)) {
-    throw new Error("Rappels indisponibles : configuration de notifications manquante.");
+  if (!vapidInspect.present || !vapidInspect.valid) {
+    fail("Rappels indisponibles : configuration de notifications manquante.", "vapid_invalid");
   }
   if (!serviceWorkerRegistration?.pushManager) {
-    throw new Error("Rappels indisponibles sur cet appareil.");
+    fail("Rappels indisponibles sur cet appareil.", "not_supported");
   }
 
   const existing = await serviceWorkerRegistration.pushManager.getSubscription();
-  if (existing) {
-    const sameKey = applicationServerKeysEqual(existing.options?.applicationServerKey, publicKey);
-    if (sameKey && isCompletePushSubscription(serializePushSubscription(existing))) {
-      return existing;
-    }
-    await existing.unsubscribe();
+  baseDiag.existingSubscription = Boolean(existing);
+
+  if (shouldReuseExistingSubscription(existing, publicKey)) {
+    return {
+      subscription: existing,
+      reused: true,
+      diagnostics: buildRegistrationDiagnostics({ ...baseDiag, subscribe: { ok: true } }),
+    };
   }
 
-  return serviceWorkerRegistration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: vapidPublicKeyToApplicationServerKey(publicKey),
-  });
+  if (existing) {
+    try {
+      await existing.unsubscribe();
+    } catch {
+      /* continue to a fresh subscribe */
+    }
+  }
+
+  try {
+    const subscription = await serviceWorkerRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: vapidPublicKeyToApplicationServerKey(publicKey),
+    });
+    return {
+      subscription,
+      reused: false,
+      diagnostics: buildRegistrationDiagnostics({ ...baseDiag, subscribe: { ok: true } }),
+    };
+  } catch (err) {
+    const mapped = new Error(mapWebPushSubscribeError(err));
+    mapped.name = err && err.name ? String(err.name) : "Error";
+    mapped.code = "subscribe_failed";
+    mapped.diagnostics = buildRegistrationDiagnostics({
+      ...baseDiag,
+      subscribe: { ok: false, name: mapped.name, message: err instanceof Error ? err.message : String(err || "") },
+    });
+    throw mapped;
+  }
 }
+
+export { applicationServerKeysEqual, buildRegistrationDiagnostics };

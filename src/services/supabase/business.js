@@ -526,7 +526,7 @@ export async function getSupplierPayments(filters = {}) {
   const sb = getSupabaseOrThrow();
   let query = sb
     .from("supplier_payments")
-    .select("id, supplier_id, arrival_id, amount_fcfa, payment_date, note, created_at, suppliers ( id, code, name )")
+    .select("id, supplier_id, arrival_id, amount_fcfa, payment_method, payment_date, note, created_at, suppliers ( id, code, name )")
     .order("payment_date", { ascending: false })
     .order("created_at", { ascending: false });
   if (filters.supplierId) query = query.eq("supplier_id", filters.supplierId);

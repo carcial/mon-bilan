@@ -75,7 +75,7 @@ function exportBodyHtml() {
     return `
       <div class="success-panel" role="status">
         <p class="success-title">Fichier Excel prêt</p>
-        <p>Le téléchargement a commencé. Stock, créances et dettes sont l’état actuel.</p>
+        <p>Le téléchargement a commencé. Les mouvements suivent la période ; stock, créances et dettes sont l’état actuel.</p>
       </div>
       <button type="button" class="btn btn-primary btn-block" data-action="export">Générer à nouveau</button>
     `;
@@ -99,7 +99,7 @@ function exportBodyHtml() {
       <p class="field-hint">
         ${
           getActiveDomain() === "church"
-            ? "Entrées, sorties et vérifications de caisse de cette période."
+            ? "Entrées, sorties, caisses, vérifications et historique de cette période."
             : "Les mouvements respectent cette période. Stock, à recevoir et à payer sont l’état actuel."
         }
       </p>
@@ -157,11 +157,12 @@ async function generate(root) {
   try {
     const workbookData = await getExcelExportData({
       ...range,
+      period: exportPeriod,
       periodLabel: periodLabelFr(exportPeriod, { from: range.from, to: range.to }),
       domain: getActiveDomain(),
     });
     const file = await writeExcelBuffer(workbookData);
-    downloadExcelBuffer(file);
+    await downloadExcelBuffer(file);
     exportStatus = "success";
   } catch (err) {
     console.warn("[export] excel failed", err);

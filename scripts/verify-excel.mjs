@@ -147,13 +147,13 @@ await verifyWorkbook(businessData, BUSINESS_EXCEL_SHEETS, (workbook) => {
     throw new Error("Business workbook must not include church sheets");
   }
   const sales = workbook.getWorksheet("Ventes");
-  const saleCustomer = String(sales.getRow(2).getCell(2).value || "");
+  const saleCustomer = String(sales.getRow(3).getCell(3).value || "");
   if (!saleCustomer.includes("Jeanne")) {
     throw new Error("Sale row missing customer");
   }
   const stock = workbook.getWorksheet("Stock");
-  const stockNote = String(stock.getRow(3).getCell(7).value || stock.getRow(2).getCell(7).value || "");
-  if (!stockNote.toLowerCase().includes("actuel")) {
+  const stockValues = stock.getSheetValues().flat().join(" ");
+  if (!stockValues.toLowerCase().includes("actuel")) {
     throw new Error("Stock snapshot note missing");
   }
 });

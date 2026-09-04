@@ -3,7 +3,9 @@
 -- Do not use effective_unit_cost_fcfa (merchandise + fees) for user-facing margin.
 -- effective_unit_cost_fcfa remains stored for internal batch cost only.
 
-CREATE OR REPLACE VIEW public.sale_item_totals AS
+DROP VIEW IF EXISTS public.sale_item_totals;
+
+CREATE VIEW public.sale_item_totals AS
 SELECT
   si.id AS sale_item_id,
   si.sale_id,

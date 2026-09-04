@@ -9,6 +9,8 @@ export const PUSH_PROVIDERS = {
 export const WEB_PUSH_ICON_PATH = "/icons/icon-192.png";
 export const WEB_PUSH_BADGE_PATH = "/icons/icon-192.png";
 
+export const WEB_PUSH_DEVICE_COLUMNS = ["provider", "endpoint", "p256dh", "auth", "enabled"];
+
 export function urlBase64ToUint8Array(base64String) {
   const raw = String(base64String || "").trim();
   if (!raw) throw new Error("VAPID public key is empty");
@@ -32,7 +34,134 @@ export function vapidPublicKeyToApplicationServerKey(publicKey) {
   if (bytes.length !== 65 || bytes[0] !== 0x04) {
     throw new Error("VAPID public key must be an uncompressed P-256 point");
   }
-  return bytes;
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy;
+}
+
+export function inspectVapidPublicKey(value) {
+  const raw = String(value || "").trim();
+  const present = Boolean(raw) && !raw.includes("YOUR_");
+  const urlSafeChars = /^[A-Za-z0-9_-]+$/.test(raw);
+  let byteLength = 0;
+  let valid = false;
+  if (present) {
+    try {
+      const bytes = urlBase64ToUint8Array(raw);
+      byteLength = bytes.length;
+      valid = bytes.length === 65 && bytes[0] === 0x04;
+    } catch {
+      byteLength = 0;
+      valid = false;
+    }
+  }
+  return { present, byteLength, valid, urlSafeChars };
+}
+
+export function vapidPublicKeysMatch(left, right) {
+  return Boolean(left && right) && String(left).trim() === String(right).trim();
+}
+
+export function applicationServerKeysEqual(left, rightKey) {
+  if (!left) return false;
+  try {
+    const expected = vapidPublicKeyToApplicationServerKey(rightKey);
+    const current = left instanceof Uint8Array ? left : new Uint8Array(left);
+    if (current.length !== expected.length) return false;
+    for (let i = 0; i < current.length; i++) {
+      if (current[i] !== expected[i]) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function shouldReuseExistingSubscription(existing, publicKey) {
+  if (!existing || !isCompletePushSubscription(serializePushSubscription(existing))) return false;
+  const currentKey = existing.options?.applicationServerKey;
+  if (!currentKey) return true;
+  return applicationServerKeysEqual(currentKey, publicKey);
+}
+
+export function mapWebPushSubscribeError(error) {
+  const name = error && typeof error === "object" ? String(error.name || "") : "";
+  switch (name) {
+    case "AbortError":
+      return "L'abonnement Web Push a été interrompu. Réessayez depuis l'application installée.";
+    case "InvalidAccessError":
+      return "La clé publique VAPID est invalide pour cet appareil.";
+    case "NotAllowedError":
+      return "Les notifications sont autorisées, mais l'abonnement Web Push a été refusé.";
+    case "NotSupportedError":
+      return "Web Push n'est pas disponible sur cet appareil.";
+    case "TypeError":
+      return "L'abonnement Web Push a échoué (paramètre invalide).";
+    default:
+      return "L'abonnement Web Push a échoué. Réessayez.";
+  }
+}
+
+export function isWebPushSchemaError(error) {
+  const code = error && typeof error === "object" ? String(error.code || "") : "";
+  const message = error instanceof Error ? error.message : String(error?.message || error || "");
+  return (
+    code === "42703" ||
+    /column .*?(provider|endpoint|p256dh|auth).*does not exist/i.test(message) ||
+    /schema cache/i.test(message)
+  );
+}
+
+export function mapWebPushUpsertError(error) {
+  if (isWebPushSchemaError(error)) {
+    return "L'enregistrement a échoué : le schéma Web Push n'est pas à jour.";
+  }
+  const message = error instanceof Error ? error.message : String(error?.message || error || "");
+  if (/on conflict/i.test(message) || /no unique or exclusion constraint/i.test(message)) {
+    return "L'enregistrement a échoué : contrainte d'abonnement manquante.";
+  }
+  return "L'enregistrement de l'appareil a échoué. Réessayez.";
+}
+
+export function sanitizeRegistrationDiagnosticMessage(message) {
+  return String(message || "")
+    .replace(/https?:\/\/[^\s]+/gi, "[url]")
+    .replace(/[A-Za-z0-9_-]{20,}/g, "[redacted]")
+    .slice(0, 180);
+}
+
+export function buildRegistrationDiagnostics({
+  permission,
+  swReady,
+  pushManager,
+  existingSubscription,
+  vapidInspect,
+  subscribe,
+  upsert,
+} = {}) {
+  return {
+    permission: permission || "unknown",
+    swReady: Boolean(swReady),
+    pushManager: Boolean(pushManager),
+    existingSubscription: Boolean(existingSubscription),
+    vapidPublicPresent: Boolean(vapidInspect?.present),
+    vapidPublicByteLength: Number(vapidInspect?.byteLength) || 0,
+    subscribe: subscribe?.ok ? "success" : `failure:${subscribe?.name || "unknown"}`,
+    subscribeMessage: subscribe?.ok ? null : sanitizeRegistrationDiagnosticMessage(subscribe?.message),
+    upsertStatus: upsert?.status ?? null,
+  };
+}
+
+export function interpretWebPushSendStatus(status) {
+  const code = Number(status);
+  if (code === 201 || code === 200) return { ok: true, stale: false, reason: "sent" };
+  if (code === 404 || code === 410) return { ok: false, stale: true, reason: "gone" };
+  if (code === 400) return { ok: false, stale: false, reason: "bad_request" };
+  if (code === 403) return { ok: false, stale: false, reason: "forbidden" };
+  if (code === 413) return { ok: false, stale: false, reason: "payload_too_large" };
+  if (code === 429) return { ok: false, stale: false, reason: "rate_limited" };
+  if (code === 500 || code === 503) return { ok: false, stale: false, reason: "push_service_unavailable" };
+  return { ok: false, stale: false, reason: "send_failed" };
 }
 
 export function vapidKeysToJwk(publicKey, privateKey) {
@@ -114,6 +243,22 @@ export function isFirebaseDevice(device) {
  * send only via Web Push. Firebase remains a fallback when none exist.
  * This prevents duplicate Firebase + Web Push notifications.
  */
+export function webPushUpsertConflictColumn() {
+  return "endpoint";
+}
+
+export function samePlatformWebPushRowsAreDistinct(left, right) {
+  return (
+    Boolean(left && right) &&
+    left.platform === right.platform &&
+    left.provider === PUSH_PROVIDERS.webpush &&
+    right.provider === PUSH_PROVIDERS.webpush &&
+    Boolean(left.endpoint) &&
+    Boolean(right.endpoint) &&
+    left.endpoint !== right.endpoint
+  );
+}
+
 export function selectDevicesForSend(devices) {
   const enabled = (devices || []).filter((d) => d && d.enabled !== false);
   const webpush = enabled.filter(isWebPushDevice);

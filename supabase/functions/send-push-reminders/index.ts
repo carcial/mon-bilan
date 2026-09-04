@@ -29,6 +29,7 @@ import {
   PUSH_PROVIDERS,
   buildWebPushMessagePayload,
   endpointsToDisableFromResults,
+  interpretWebPushSendStatus,
   isStalePushStatus,
   missingWebPushServerEnvNames,
   normalizeWebPushSubject,
@@ -176,14 +177,14 @@ async function sendWebPushToSubscription({
     vapid,
   );
   const res = await fetch(subscription.endpoint, request);
-  if (res.ok || res.status === 201) {
-    return { ok: true, status: res.status, endpoint: device.endpoint, stale: false };
-  }
+  const interpreted = interpretWebPushSendStatus(res.status);
+  console.info("[web-push-send]", { status: res.status, reason: interpreted.reason, stale: interpreted.stale });
   return {
-    ok: false,
+    ok: interpreted.ok,
     status: res.status,
+    reason: interpreted.reason,
     endpoint: device.endpoint,
-    stale: isStalePushStatus(res.status),
+    stale: interpreted.stale || isStalePushStatus(res.status),
   };
 }
 
@@ -495,6 +496,7 @@ serve(async (req) => {
     const invalidTokens: string[] = [];
     const sendResults: Array<{ endpoint?: string; stale?: boolean; status?: number }> = [];
     let lastFailure = "";
+    let lastHttpStatus = 0;
 
     for (const d of devices) {
       if (plan.preferredProvider === PUSH_PROVIDERS.webpush && vapid) {
@@ -510,8 +512,9 @@ serve(async (req) => {
           }),
         });
         sendResults.push(res);
+        lastHttpStatus = Number(res.status) || lastHttpStatus;
         if (res.ok) anySuccess = true;
-        else lastFailure = String(res.status || "webpush_failed");
+        else lastFailure = String(res.reason || res.status || "webpush_failed");
       } else {
         const token = d.fcm_token;
         const res = await sendFcmDataMessage({
@@ -552,11 +555,19 @@ serve(async (req) => {
         sent: 0,
         code: failedCode,
         error: "La notification n'a pas pu être envoyée. Réessayez.",
+        http_status: lastHttpStatus || undefined,
+        send_reason: lastFailure || undefined,
         fcm_status: lastFailure || undefined,
       });
     }
 
-    return json(req, { ok: true, sent: 1, code: requestType === "smoke" ? "smoke_sent" : "sent" });
+    return json(req, {
+      ok: true,
+      sent: 1,
+      code: requestType === "smoke" ? "smoke_sent" : "sent",
+      provider: plan.preferredProvider,
+      http_status: lastHttpStatus || 201,
+    });
   }
 
   if (!enabled) {

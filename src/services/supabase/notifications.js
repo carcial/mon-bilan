@@ -3,6 +3,7 @@ import {
   PUSH_PROVIDERS,
   buildWebPushDeviceUpsertPayload,
   isCompletePushSubscription,
+  mapWebPushUpsertError,
   serializePushSubscription,
 } from "../../../supabase/functions/_shared/web-push.js";
 import { getSupabase, getSupabaseOrThrow } from "./client.js";
@@ -76,8 +77,15 @@ export async function upsertPushDevice({
   });
   const onConflict = payload.provider === PUSH_PROVIDERS.webpush ? "endpoint" : "fcm_token";
 
-  const { error } = await sb.from("push_devices").upsert(payload, { onConflict });
-  if (error) throw error;
+  const { error, status } = await sb.from("push_devices").upsert(payload, { onConflict });
+  if (error) {
+    const mapped = new Error(mapWebPushUpsertError(error));
+    mapped.code = error.code || "upsert_failed";
+    mapped.httpStatus = status;
+    mapped.supabaseMessage = error.message;
+    throw mapped;
+  }
+  payload._upsertStatus = status || 201;
   return payload;
 }
 
