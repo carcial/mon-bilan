@@ -1,9 +1,12 @@
 import { ROUTES } from "../../router.js";
+import { iconHtml } from "../../components/icons.js";
+import { getActiveDomain } from "../../state/app-mode.js";
 import { matchMoreRoute, MORE_PATHS } from "./more-routes.js";
 import { pageHeaderHtml } from "./more-ui.js";
 import { renderGlobalReport } from "./more-reports.js";
 import { renderExcelExport } from "./more-export.js";
 import { renderActivity } from "./more-activity.js";
+import { renderMoreRappels } from "./more-rappels.js";
 
 export function renderMoreScreen(root, ctx = {}) {
   const match = matchMoreRoute(ctx.path || ROUTES.more);
@@ -18,6 +21,9 @@ export function renderMoreScreen(root, ctx = {}) {
     case "activity":
       renderActivity(root);
       return;
+    case "rappels":
+      renderMoreRappels(root);
+      return;
     case "menu":
     default:
       renderMoreMenu(root);
@@ -30,41 +36,41 @@ export function renderMorePlaceholder(root, ctx) {
 }
 
 function renderMoreMenu(root) {
+  const church = getActiveDomain() === "church";
   root.innerHTML = `
     <section class="page more-page" aria-labelledby="more-title">
       ${pageHeaderHtml({
-        kicker: "Paramètres",
         title: "Plus",
-        subtitle: "Rapports, export Excel et journal d’activité. Pas de compte, pas de mot de passe.",
+        subtitle: "Export, journal d’activité et informations.",
         titleId: "more-title",
       })}
 
       <nav class="more-menu stack" aria-label="Actions supplémentaires">
-        <a class="card more-link" href="#${MORE_PATHS.report}">
-          <span class="card-icon" aria-hidden="true">▤</span>
+        <a class="card more-link" href="#${MORE_PATHS.rappels}">
+          <span class="card-icon">${iconHtml("bell", { weight: "bold", size: "lg" })}</span>
           <span>
-            <strong>Rapport</strong>
-            <span class="card-meta">Église et Commerce, période par période</span>
+            <strong>Rappels</strong>
+            <span class="card-meta">Notifications de l’église et du commerce</span>
           </span>
         </a>
         <a class="card more-link" href="#${MORE_PATHS.export}">
-          <span class="card-icon" aria-hidden="true">⇩</span>
+          <span class="card-icon">${iconHtml("microsoft-excel-logo", { weight: "bold", size: "lg" })}</span>
           <span>
             <strong>Exporter Excel</strong>
-            <span class="card-meta">Classeur .xlsx pour Microsoft Excel</span>
+            <span class="card-meta">${church ? "Télécharger le classeur de la trésorerie" : "Télécharger le classeur du commerce"}</span>
           </span>
         </a>
         <a class="card more-link" href="#${MORE_PATHS.activity}">
-          <span class="card-icon" aria-hidden="true">◷</span>
+          <span class="card-icon">${iconHtml("clock-counter-clockwise", { weight: "bold", size: "lg" })}</span>
           <span>
-            <strong>Activité</strong>
-            <span class="card-meta">Modifications et suppressions</span>
+            <strong>Journal d’activité</strong>
+            <span class="card-meta">${church ? "Modifications de la trésorerie" : "Modifications du commerce"}</span>
           </span>
         </a>
       </nav>
 
       <article class="card">
-        <h2 class="section-title" style="margin-top:0">Application</h2>
+        <h2 class="section-title" style="margin-top:0">À propos</h2>
         <p class="card-meta">
           Mon Bilan s’installe sur l’écran d’accueil. Les écritures ont besoin d’une connexion.
           Si le réseau est coupé, l’écran peut s’ouvrir, mais rien n’est enregistré hors ligne.
@@ -73,3 +79,4 @@ function renderMoreMenu(root) {
     </section>
   `;
 }
+

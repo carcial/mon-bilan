@@ -5,24 +5,18 @@
 import { formatFcfa } from "../../utils/money.js";
 import { escapeHtml } from "../../utils/errors.js";
 import { ROUTES } from "../../router.js";
+import { iconHtml } from "../../components/icons.js";
+import { pageHeaderHtml as sharedPageHeaderHtml, backLinkHtml } from "../../components/page-header.js";
 
-export function backLinkHtml(href, label = "Retour") {
-  return `
-    <a class="back-link" href="#${href}">
-      <span aria-hidden="true">←</span> ${escapeHtml(label)}
-    </a>
-  `;
-}
+export { backLinkHtml };
 
-export function pageHeaderHtml({ kicker, title, subtitle, backHref, backLabel }) {
-  return `
-    <header class="page-header">
-      ${backHref ? backLinkHtml(backHref, backLabel || "Retour à Église") : ""}
-      ${kicker ? `<p class="page-kicker">${escapeHtml(kicker)}</p>` : ""}
-      <h1 class="page-title" id="church-title">${escapeHtml(title)}</h1>
-      ${subtitle ? `<p class="page-subtitle">${escapeHtml(subtitle)}</p>` : ""}
-    </header>
-  `;
+export function pageHeaderHtml(props = {}) {
+  return sharedPageHeaderHtml({
+    kicker: "Église",
+    backLabel: "Retour à Église",
+    titleId: "church-title",
+    ...props,
+  });
 }
 
 export function skeletonHtml(lines = 3) {
@@ -83,9 +77,9 @@ export function typeLabel(type) {
 
 export function typeBadgeHtml(type) {
   if (type === "expense") {
-    return `<span class="tx-kind tx-kind-out"><span aria-hidden="true">↓</span> SORTIE</span>`;
+    return `<span class="tx-kind tx-kind-out">${iconHtml("arrow-up", { weight: "bold", size: "sm" })} SORTIE</span>`;
   }
-  return `<span class="tx-kind tx-kind-in"><span aria-hidden="true">↑</span> ENTRÉE</span>`;
+  return `<span class="tx-kind tx-kind-in">${iconHtml("arrow-down", { weight: "bold", size: "sm" })} ENTRÉE</span>`;
 }
 
 export function noteIndicatorHtml(note) {

@@ -4,9 +4,32 @@
 
 import { formatFcfa } from "./money.js";
 
+export const CHURCH_AUDIT_TABLES = [
+  "church_transactions",
+  "church_reconciliations",
+  "church_funds",
+];
+
+export const BUSINESS_AUDIT_TABLES = [
+  "stock_arrivals",
+  "sales",
+  "sale_items",
+  "customers",
+  "suppliers",
+  "products",
+  "customer_payments",
+  "supplier_payments",
+  "business_expenses",
+  "inventory_adjustments",
+];
+
+export function auditTablesForDomain(domain) {
+  return domain === "church" ? CHURCH_AUDIT_TABLES : BUSINESS_AUDIT_TABLES;
+}
+
 const TABLE_LABELS = {
   church_transactions: "Transaction Église",
-  church_reconciliations: "Rapprochement Église",
+  church_reconciliations: "Vérification de caisse",
   church_funds: "Caisse",
   stock_arrivals: "Arrivage",
   sales: "Vente",

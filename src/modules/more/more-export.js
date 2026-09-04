@@ -1,4 +1,6 @@
+import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { getExcelExportData } from "../../services/supabase/export.js";
+import { getActiveDomain } from "../../state/app-mode.js";
 import { downloadExcelBuffer, writeExcelBuffer } from "../../utils/excel-write.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
 import { getPeriodRange, periodLabelFr, PERIODS } from "../../utils/periods.js";
@@ -13,9 +15,12 @@ export function renderExcelExport(root) {
   root.innerHTML = `
     <section class="page more-page" aria-labelledby="more-title">
       ${pageHeaderHtml({
-        kicker: "Fichier",
+        kicker: "Plus",
         title: "Exporter Excel",
-        subtitle: "Un classeur lisible dans Microsoft Excel, sans serveur.",
+        subtitle:
+          getActiveDomain() === "church"
+            ? "Export de la trésorerie de l’église uniquement."
+            : "Export du commerce uniquement.",
         backHref: "/plus/rapport",
         backLabel: "Retour au rapport",
         titleId: "more-title",
@@ -32,10 +37,11 @@ function periodFiltersHtml() {
     [PERIODS.week, "Cette semaine"],
     [PERIODS.month, "Ce mois"],
     [PERIODS.year, "Cette année"],
-    [PERIODS.custom, "Période"],
+    [PERIODS.custom, "Personnalisée"],
   ];
   return `
     <div class="filter-panel stack-sm">
+      <p class="filter-legend">Période</p>
       <div class="filter-row" role="group" aria-label="Période à exporter">
         ${buttons
           .map(
@@ -51,14 +57,8 @@ function periodFiltersHtml() {
           .join("")}
       </div>
       <div class="custom-period${exportPeriod === PERIODS.custom ? "" : " is-hidden"}" data-role="custom-period">
-        <div class="field">
-          <label class="field-label" for="export-from">Du</label>
-          <input id="export-from" class="field-input" type="date" value="${escapeHtml(exportFrom)}" data-role="from" />
-        </div>
-        <div class="field">
-          <label class="field-label" for="export-to">Au</label>
-          <input id="export-to" class="field-input" type="date" value="${escapeHtml(exportTo)}" data-role="to" />
-        </div>
+        ${dateFieldHtml({ id: "export-from", name: "from", label: "Date de début", value: exportFrom, dataRole: "from", defaultToday: false })}
+        ${dateFieldHtml({ id: "export-to", name: "to", label: "Date de fin", value: exportTo, dataRole: "to", defaultToday: false })}
       </div>
     </div>
   `;
@@ -74,7 +74,7 @@ function exportBodyHtml() {
   if (exportStatus === "success") {
     return `
       <div class="success-panel" role="status">
-        <p class="success-title">✓ Fichier Excel prêt</p>
+        <p class="success-title">Fichier Excel prêt</p>
         <p>Le téléchargement a commencé. Stock, créances et dettes sont l’état actuel.</p>
       </div>
       <button type="button" class="btn btn-primary btn-block" data-action="export">Générer à nouveau</button>
@@ -97,8 +97,11 @@ function exportBodyHtml() {
       <p class="home-metric-label">Période</p>
       <p class="metric-plain">${escapeHtml(periodLabelFr(exportPeriod, { from: range.from, to: range.to }))}</p>
       <p class="field-hint">
-        Les feuilles de mouvements respectent cette période.
-        Stock, à recevoir et à payer sont un état actuel.
+        ${
+          getActiveDomain() === "church"
+            ? "Entrées, sorties et vérifications de caisse de cette période."
+            : "Les mouvements respectent cette période. Stock, à recevoir et à payer sont l’état actuel."
+        }
       </p>
     </article>
     <button type="button" class="btn btn-primary btn-block" data-action="export">Générer le fichier Excel</button>
@@ -109,6 +112,7 @@ function bind(root) {
   const filtersEl = root.querySelector('[data-role="filters"]');
   const body = root.querySelector('[data-role="body"]');
   if (!filtersEl || !body) return;
+  bindDateFields(filtersEl);
 
   filtersEl.querySelectorAll("[data-period]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -154,6 +158,7 @@ async function generate(root) {
     const workbookData = await getExcelExportData({
       ...range,
       periodLabel: periodLabelFr(exportPeriod, { from: range.from, to: range.to }),
+      domain: getActiveDomain(),
     });
     const file = await writeExcelBuffer(workbookData);
     downloadExcelBuffer(file);

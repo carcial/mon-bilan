@@ -2,7 +2,7 @@
  * Pure church financial calculations (integer FCFA).
  */
 
-import { toFcfaInteger } from "./money.js";
+import { MAX_FCFA_INPUT, toFcfaInteger } from "./money.js";
 import { isDateInRange } from "./periods.js";
 
 /**
@@ -173,6 +173,7 @@ export function validateChurchTransaction(input = {}) {
     errors.type = "Type d'opération invalide.";
   }
   if (amount <= 0) errors.amount = "Le montant doit être supérieur à 0.";
+  if (amount > MAX_FCFA_INPUT) errors.amount = "Le montant est trop grand.";
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     errors.date = "Indiquez une date.";
   }

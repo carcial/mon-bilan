@@ -24,6 +24,8 @@ import {
   renderReceivables,
   renderSaleDetail,
 } from "./business-ops.js";
+import { renderCustomerPaymentForm } from "./business-payment.js";
+import { renderBusinessQuickActions } from "./business-quick-actions.js";
 
 /**
  * Business module dispatcher.
@@ -35,6 +37,9 @@ export function renderBusinessScreen(root, ctx = {}) {
   const shared = { onChanged: ctx.onChanged };
 
   switch (route.name) {
+    case "quick-actions":
+      renderBusinessQuickActions(root);
+      return;
     case "sale":
       renderSaleForm(root, shared);
       break;
@@ -89,6 +94,9 @@ export function renderBusinessScreen(root, ctx = {}) {
     case "bordereau":
       renderBordereauDetail(root, { id: route.id });
       break;
+    case "customer-payment":
+      renderCustomerPaymentForm(root, shared);
+      break;
     case "receivables":
       renderReceivables(root);
       break;
@@ -112,3 +120,4 @@ export function renderBusinessScreen(root, ctx = {}) {
 export function renderBusinessPlaceholder(root, ctx) {
   renderBusinessScreen(root, ctx);
 }
+

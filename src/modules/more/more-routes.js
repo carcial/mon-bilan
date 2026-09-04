@@ -8,6 +8,7 @@ export function matchMoreRoute(path) {
   if (head === "rapport") return { name: "report" };
   if (head === "export") return { name: "export" };
   if (head === "activite") return { name: "activity" };
+  if (head === "rappels") return { name: "rappels" };
   return { name: "menu" };
 }
 
@@ -16,4 +17,6 @@ export const MORE_PATHS = {
   report: "/plus/rapport",
   export: "/plus/export",
   activity: "/plus/activite",
+  rappels: "/plus/rappels",
 };
+

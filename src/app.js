@@ -1,42 +1,42 @@
 import { renderBottomNav } from "./components/bottom-nav.js";
+import { renderModeSwitch } from "./components/mode-switch.js";
 import { renderHomeScreen } from "./modules/home/home-screen.js";
 import { renderChurchScreen } from "./modules/church/church-screen.js";
 import { renderBusinessScreen } from "./modules/business/business-screen.js";
 import { renderHistoryScreen } from "./modules/history/history-screen.js";
 import { renderMoreScreen } from "./modules/more/more-screen.js";
-import {
-  startRouter,
-  onRouteChange,
-  matchRoute,
-  getHashPath,
-} from "./router.js";
-import { fetchCombinedChurchBalance } from "./services/supabase/church.js";
-import { fetchMonthlyBusinessResult } from "./services/supabase/business.js";
+import { startRouter, onRouteChange, matchRoute, getHashPath } from "./router.js";
+import { rememberPath } from "./utils/back-nav.js";
+import { applyAppMode, onAppModeChange, syncModeFromPath } from "./state/app-mode.js";
+import { installPushClickRouting } from "./push/sw-click-routing.js";
 
 export function createApp() {
   const main = document.getElementById("main-content");
   const nav = document.getElementById("bottom-nav");
+  const sidebar = document.getElementById("app-sidebar");
+  const topbar = document.getElementById("app-topbar");
 
   if (!main || !nav) {
     throw new Error("Shell DOM manquant (#main-content / #bottom-nav)");
   }
 
-  /** @type {{ churchBalance: number | null, businessResult: number | null }} */
-  let homeData = {
-    churchBalance: null,
-    businessResult: null,
-  };
+  applyAppMode();
+  installPushClickRouting();
 
   function render(path = getHashPath()) {
+    rememberPath(path);
+    syncModeFromPath(path);
+    renderModeSwitch(topbar, { path });
     renderBottomNav(nav, path);
+    if (sidebar) renderBottomNav(sidebar, path, { variant: "sidebar" });
     const route = matchRoute(path);
 
     switch (route) {
       case "church":
-        renderChurchScreen(main, { path, onChanged: refreshHomeMetrics });
+        renderChurchScreen(main, { path, onChanged: refreshCurrent });
         break;
       case "business":
-        renderBusinessScreen(main, { path, onChanged: refreshHomeMetrics });
+        renderBusinessScreen(main, { path, onChanged: refreshCurrent });
         break;
       case "history":
         renderHistoryScreen(main);
@@ -46,31 +46,34 @@ export function createApp() {
         break;
       case "home":
       default:
-        renderHomeScreen(main, homeData);
+        renderHomeScreen(main, { onChanged: refreshCurrent });
         break;
     }
 
     main.focus({ preventScroll: true });
   }
 
-  async function refreshHomeMetrics() {
-    try {
-      const [churchBalance, businessResult] = await Promise.all([
-        fetchCombinedChurchBalance(),
-        fetchMonthlyBusinessResult(),
-      ]);
-      homeData = { churchBalance, businessResult };
-      if (matchRoute(getHashPath()) === "home") {
-        renderHomeScreen(main, homeData);
-      }
-    } catch (err) {
-      console.warn("[app] metrics refresh failed", err);
-    }
+  function refreshCurrent() {
+    render(getHashPath());
   }
 
   onRouteChange(render);
+  onAppModeChange(() => {
+    const path = getHashPath();
+    const route = matchRoute(path);
+    renderModeSwitch(topbar, { path });
+    renderBottomNav(nav, path);
+    if (sidebar) renderBottomNav(sidebar, path, { variant: "sidebar" });
+    if (route === "home") {
+      renderHomeScreen(main, { onChanged: refreshCurrent });
+    } else if (route === "history") {
+      renderHistoryScreen(main);
+    } else if (route === "more") {
+      renderMoreScreen(main, { path });
+    }
+  });
   startRouter();
-  refreshHomeMetrics();
 
-  return { render, refreshHomeMetrics };
+  return { render, refreshHomeMetrics: refreshCurrent };
 }
+

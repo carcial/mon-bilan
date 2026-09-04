@@ -1,8 +1,10 @@
 import { amountHtml } from "../../components/amount.js";
+import { renderDonutChart, renderGroupedBarChart } from "../../components/charts.js";
 import { ROUTES } from "../../router.js";
 import { getChurchReport } from "../../services/supabase/church.js";
 import { formatFcfa, formatFcfaSigned } from "../../utils/money.js";
-import { formatLongDateFr } from "../../utils/dates.js";
+import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
+import { displayDateFr } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
 import {
   getPeriodRange,
@@ -36,7 +38,7 @@ export function renderChurchReport(root) {
         backHref: ROUTES.church,
       })}
       <div data-role="filters">${periodFiltersHtml()}</div>
-      <div data-role="body">${skeletonHtml(4)}</div>
+      <div class="report-stack" data-role="body">${skeletonHtml(4)}</div>
     </section>
   `;
 
@@ -46,14 +48,15 @@ export function renderChurchReport(root) {
 
 function periodFiltersHtml() {
   const buttons = [
-    [PERIODS.week, "Semaine"],
-    [PERIODS.month, "Mois"],
-    [PERIODS.year, "Année"],
-    [PERIODS.custom, "Période"],
+    [PERIODS.week, "Cette semaine"],
+    [PERIODS.month, "Ce mois"],
+    [PERIODS.year, "Cette année"],
+    [PERIODS.custom, "Personnalisée"],
   ];
 
   return `
     <div class="filter-panel stack-sm">
+      <p class="filter-legend">Période</p>
       <div class="filter-row" role="group" aria-label="Période du rapport">
         ${buttons
           .map(
@@ -69,14 +72,8 @@ function periodFiltersHtml() {
           .join("")}
       </div>
       <div class="custom-period${reportPeriod === PERIODS.custom ? "" : " is-hidden"}" data-role="custom-period">
-        <div class="field">
-          <label class="field-label" for="report-from">Du</label>
-          <input id="report-from" class="field-input" type="date" value="${escapeHtml(reportFrom)}" data-role="from" />
-        </div>
-        <div class="field">
-          <label class="field-label" for="report-to">Au</label>
-          <input id="report-to" class="field-input" type="date" value="${escapeHtml(reportTo)}" data-role="to" />
-        </div>
+        ${dateFieldHtml({ id: "report-from", name: "from", label: "Date de début", value: reportFrom, dataRole: "from", defaultToday: false })}
+        ${dateFieldHtml({ id: "report-to", name: "to", label: "Date de fin", value: reportTo, dataRole: "to", defaultToday: false })}
       </div>
     </div>
   `;
@@ -86,6 +83,7 @@ function bindPeriodFilters(root) {
   const filtersEl = root.querySelector('[data-role="filters"]');
   const body = root.querySelector('[data-role="body"]');
   if (!filtersEl || !body) return;
+  bindDateFields(filtersEl);
 
   filtersEl.querySelectorAll("[data-period]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -128,6 +126,7 @@ async function loadReport(body) {
   try {
     const report = await getChurchReport(range);
     body.innerHTML = reportHtml(report, range);
+    bindReportCharts(body, report);
   } catch (err) {
     console.warn("[church] report load failed", err);
     body.innerHTML = errorStateHtml(friendlyError(err));
@@ -142,7 +141,7 @@ function reportHtml(report, range) {
     reportPeriod === PERIODS.month
       ? monthTitleFr()
       : reportPeriod === PERIODS.custom && range.from && range.to
-        ? `${formatLongDateFr(range.from)} → ${formatLongDateFr(range.to)}`
+        ? `${displayDateFr(range.from)} → ${displayDateFr(range.to)}`
         : periodLabelFr(reportPeriod);
 
   const { totals, byFund, endingTotal } = report;
@@ -180,28 +179,50 @@ function reportHtml(report, range) {
           })
     }
 
-    <article class="card card-accent-church">
-      <p class="home-metric-label">Entrées</p>
-      <div class="amount-positive">${amountHtml(totals.incomeTotal, { className: "amount-sm" })}</div>
-      <p class="home-metric-label">Sorties</p>
-      <div class="amount-negative">${amountHtml(totals.expenseTotal, { className: "amount-sm" })}</div>
-      <p class="home-metric-label">Variation</p>
-      <div>${amountHtml(totals.netMovement, { className: "amount-sm", signed: true })}</div>
-      <p class="field-hint">${escapeHtml(formatFcfaSigned(totals.netMovement))}</p>
+    <article class="hero-card">
+      <p class="hero-kicker">Solde de fin</p>
+      <div>${amountHtml(endingTotal)}</div>
+      <div class="hero-metrics">
+        <div class="hero-metric"><span>Entrées</span><strong>${escapeHtml(formatFcfa(totals.incomeTotal))}</strong></div>
+        <div class="hero-metric"><span>Sorties</span><strong>${escapeHtml(formatFcfa(totals.expenseTotal))}</strong></div>
+        <div class="hero-metric"><span>Variation</span><strong>${escapeHtml(formatFcfaSigned(totals.netMovement))}</strong></div>
+      </div>
+      ${range.to ? `<p class="field-hint" style="color:rgba(255,255,255,0.78);margin-top:1rem">Au ${escapeHtml(displayDateFr(range.to))}</p>` : ""}
     </article>
 
-    <article class="card">
-      <p class="home-metric-label">Solde de fin</p>
-      <div>${amountHtml(endingTotal)}</div>
-      ${
-        range.to
-          ? `<p class="field-hint">Au ${escapeHtml(formatLongDateFr(range.to))}</p>`
-          : ""
-      }
+    <article class="chart-card">
+      <h2 class="section-title">Entrées et sorties</h2>
+      <div class="chart-frame">
+        <canvas data-role="church-flow" aria-label="Entrées et sorties"></canvas>
+      </div>
+    </article>
+
+    <article class="chart-card">
+      <h2 class="section-title">Caisses</h2>
+      <div class="chart-frame">
+        <canvas data-role="church-funds" aria-label="Soldes par caisse"></canvas>
+      </div>
     </article>
 
     <div class="fund-grid">
       ${fundBlocks}
     </div>
   `;
+}
+
+function bindReportCharts(body, report) {
+  renderGroupedBarChart(body.querySelector('[data-role="church-flow"]'), {
+    labels: ["Période"],
+    series: [
+      { label: "Entrées", values: [report.totals.incomeTotal || 0], color: "#25835A" },
+      { label: "Sorties", values: [report.totals.expenseTotal || 0], color: "#B83A3A" },
+    ],
+  });
+  const funds = report.byFund || [];
+  if (!funds.length) return;
+  renderDonutChart(body.querySelector('[data-role="church-funds"]'), {
+    labels: funds.map((row) => fundName(row.fund)),
+    values: funds.map((row) => row.endingBalance || 0),
+    colors: ["#5E63D8", "#8B7CF6", "#4B6FA8", "#25835A"],
+  });
 }

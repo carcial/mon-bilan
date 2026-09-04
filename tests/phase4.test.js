@@ -21,7 +21,7 @@ import {
 } from "../src/utils/history-events.js";
 import { buildGlobalReport, hasForbiddenCombinedTotal } from "../src/utils/global-report.js";
 import { formatAuditEvent } from "../src/utils/audit-format.js";
-import { buildExcelWorkbookData, EXCEL_SHEET_NAMES } from "../src/utils/excel-workbook.js";
+import { buildExcelWorkbookData, CHURCH_EXCEL_SHEETS } from "../src/utils/excel-workbook.js";
 import { matchMoreRoute } from "../src/modules/more/more-routes.js";
 
 const arrivalRow = {
@@ -41,7 +41,8 @@ const saleRow = {
   customer_id: "c1",
   sale_date: "2026-09-02",
   amount_paid_fcfa: 50000,
-  payment_method: "partial",
+  settlement_status: "partial",
+  payment_method: "cash",
   created_at: "2026-09-02T11:00:00Z",
   note: "Acompte",
   customers: { id: "c1", name: "Maman Jeanne" },
@@ -176,7 +177,7 @@ describe("report transformations", () => {
       },
       business: {
         saleItems: [
-          { quantity: 10, sale_unit_price_fcfa: 30000, effective_unit_cost_fcfa: 25000 },
+          { quantity: 10, sale_unit_price_fcfa: 30000, supplier_unit_price_fcfa: 22000, effective_unit_cost_fcfa: 25000 },
         ],
         sales: [{ amount_paid_fcfa: 200000 }],
         customerPayments: [{ amount_fcfa: 40000 }],
@@ -191,9 +192,9 @@ describe("report transformations", () => {
     expect(report.church.expenseTotal).toBe(215000);
     expect(report.church.variation).toBe(610000);
     expect(report.business.revenue).toBe(300000);
-    expect(report.business.cogs).toBe(250000);
+    expect(report.business.cogs).toBe(220000);
     expect(report.business.operatingExpenses).toBe(15000);
-    expect(report.business.estimatedProfit).toBe(35000);
+    expect(report.business.estimatedProfit).toBe(65000);
     expect(report.business.cashCollected).toBe(240000);
     expect(hasForbiddenCombinedTotal(report)).toBe(false);
     expect(report.church.incomeTotal + report.business.revenue).not.toBe(
@@ -251,7 +252,7 @@ describe("audit formatting", () => {
 });
 
 describe("excel export data structure", () => {
-  it("creates the expected worksheets without UUID columns", () => {
+  it("creates church worksheets without UUID columns or business sheets", () => {
     const workbook = buildExcelWorkbookData({
       periodLabel: "SEPTEMBRE 2026",
       range: { from: "2026-09-01", to: "2026-09-30" },
@@ -332,9 +333,10 @@ describe("excel export data structure", () => {
           quantity_available: 18,
         },
       ],
-    });
+    }, "church");
 
-    expect(workbook.sheets.map((sheet) => sheet.name)).toEqual(EXCEL_SHEET_NAMES);
+    expect(workbook.sheets.map((sheet) => sheet.name)).toEqual(CHURCH_EXCEL_SHEETS);
+    expect(workbook.sheets.map((sheet) => sheet.name).join(" ")).not.toMatch(/Ventes|Arrivages|Stock/);
     const headerBlob = workbook.sheets
       .flatMap((sheet) => sheet.headers)
       .join(" ")
@@ -344,9 +346,8 @@ describe("excel export data structure", () => {
 
     const resume = workbook.sheets[0];
     const labels = resume.rows.map((row) => row[0].value);
-    expect(labels).toContain("ÉGLISE");
-    expect(labels).toContain("COMMERCE");
-    expect(labels.join(" ")).not.toMatch(/total combiné|grand total/i);
+    expect(labels).toContain("Entrées");
+    expect(labels.join(" ")).not.toMatch(/chiffre d'affaires|grand total/i);
 
     const income = workbook.sheets[1].rows[0];
     expect(income[0].value).toBe("02/09/2026");
@@ -362,5 +363,6 @@ describe("more routes", () => {
     expect(matchMoreRoute("/plus/rapport").name).toBe("report");
     expect(matchMoreRoute("/plus/export").name).toBe("export");
     expect(matchMoreRoute("/plus/activite").name).toBe("activity");
+    expect(matchMoreRoute("/plus/rappels").name).toBe("rappels");
   });
 });

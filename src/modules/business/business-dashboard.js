@@ -1,34 +1,49 @@
 import { amountHtml } from "../../components/amount.js";
+import { iconHtml } from "../../components/icons.js";
+import { renderGroupedBarChart, weeklySeriesFromRows } from "../../components/charts.js";
 import { isSupabaseConfigured } from "../../config.js";
 import { getBusinessReport } from "../../services/supabase/business.js";
-import { todayIso } from "../../utils/dates.js";
+import { greetingForNow, todayIso } from "../../utils/dates.js";
 import { friendlyError, escapeHtml } from "../../utils/errors.js";
+import { saleItemsTotal } from "../../utils/business-calc.js";
+import { formatFcfa } from "../../utils/money.js";
+import { getPeriodRange, monthTitleFr, PERIODS } from "../../utils/periods.js";
 import {
   BUSINESS_LINKS,
   emptyStateHtml,
   errorStateHtml,
   skeletonHtml,
-  unitLabel,
+  stockWatchHtml,
 } from "./business-ui.js";
 
-export function renderBusinessDashboard(root) {
+/**
+ * @param {HTMLElement} root
+ * @param {{ embedded?: boolean }} [ctx]
+ */
+export function renderBusinessDashboard(root, ctx = {}) {
+  const greeting = greetingForNow();
+  const month = monthTitleFr();
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      <header class="page-header">
-        <p class="page-kicker">Activité</p>
-        <h1 class="page-title" id="business-title">Commerce</h1>
+      <header class="page-header home-greeting">
+        <p class="dash-date">${escapeHtml(greeting)} · ${escapeHtml(month)}</p>
+        <h1 class="dash-title" id="business-title">Commerce</h1>
       </header>
       ${
         isSupabaseConfigured()
           ? `<div data-role="body">${skeletonHtml(4)}</div>`
           : `
-        <div class="config-banner" role="status">
-          <span aria-hidden="true">ℹ</span>
-          <div>
-            <strong>Configuration requise</strong>
-            Connectez Supabase pour enregistrer ventes et arrivages.
-          </div>
-        </div>
+        ${
+          ctx.embedded
+            ? ""
+            : `<div class="config-banner" role="status">
+                ${iconHtml("info", { weight: "fill", size: "md" })}
+                <div>
+                  <strong>Configuration requise</strong>
+                  Connectez Supabase pour enregistrer ventes et arrivages.
+                </div>
+              </div>`
+        }
         ${emptyStateHtml({ title: "Aucune donnée pour le moment." })}
       `
       }
@@ -42,8 +57,13 @@ async function loadDashboard(body) {
   if (!body) return;
   try {
     const today = todayIso();
-    const report = await getBusinessReport({ from: today, to: today });
-    body.innerHTML = dashboardHtml(report);
+    const month = getPeriodRange(PERIODS.month);
+    const [todayReport, monthReport] = await Promise.all([
+      getBusinessReport({ from: today, to: today }),
+      getBusinessReport(month),
+    ]);
+    body.innerHTML = dashboardHtml({ todayReport, monthReport });
+    bindCharts(body, monthReport);
   } catch (err) {
     console.warn("[business] dashboard failed", err);
     body.innerHTML = errorStateHtml(friendlyError(err));
@@ -54,60 +74,124 @@ async function loadDashboard(body) {
   }
 }
 
-function dashboardHtml(report) {
-  const stockHint = report.inventory
-    .map((row) => `${row.quantity_available} ${unitLabel(row.unit_type, row.quantity_available)} ${row.product_name}`)
-    .join(" · ");
+function dashboardHtml({ todayReport, monthReport }) {
+  const owing = (monthReport.receivables || []).filter((row) => row.outstanding > 0).slice(0, 3);
+  const payable = (monthReport.payables || []).filter((row) => row.outstanding > 0).slice(0, 3);
 
   return `
-    <p class="report-period">AUJOURD'HUI</p>
-    <article class="card card-accent-business">
-      ${metricRow("Ventes", report.revenue)}
-      ${metricRow("Cash reçu", report.cashCollected)}
-      ${metricRow("Crédit accordé", report.creditIssued)}
-      ${metricRow("Dépenses", report.operatingExpenses)}
-      <p class="home-metric-label">Marge estimée</p>
-      <div>${amountHtml(report.estimatedProfit, { className: "amount-sm", signed: true })}</div>
-      <p class="home-metric-label">Sacs vendus</p>
-      <p class="metric-plain">${escapeHtml(String(report.unitsSold))}</p>
-    </article>
-
-    <div class="fund-grid">
-      <article class="card">
-        <p class="home-metric-label">À recevoir des clients</p>
-        <div>${amountHtml(report.receivablesTotal, { className: "amount-sm" })}</div>
-        <a class="back-link" href="#${BUSINESS_LINKS.receivables}">Voir les clients</a>
+    <div class="dashboard-grid">
+      <article class="hero-card">
+        <p class="hero-kicker">Résultat du mois</p>
+        <div>${amountHtml(monthReport.estimatedProfit, { signed: true })}</div>
+        <div class="hero-metrics">
+          <div class="hero-metric">
+            <span>Ventes</span>
+            <strong>${escapeHtml(formatFcfa(monthReport.revenue))}</strong>
+          </div>
+          <div class="hero-metric">
+            <span>Dépenses</span>
+            <strong>${escapeHtml(formatFcfa(monthReport.operatingExpenses))}</strong>
+          </div>
+          <div class="hero-metric">
+            <span>Marge</span>
+            <strong>${escapeHtml(formatFcfa(monthReport.grossMargin))}</strong>
+          </div>
+        </div>
       </article>
-      <article class="card">
-        <p class="home-metric-label">À payer aux fournisseurs</p>
-        <div>${amountHtml(report.payablesTotal, { className: "amount-sm" })}</div>
-        <a class="back-link" href="#${BUSINESS_LINKS.payables}">Voir les fournisseurs</a>
+
+      <section class="section-block dashboard-span">
+        <h2 class="section-title">Actions</h2>
+        <div class="actions-grid-4">
+          ${actionTile(BUSINESS_LINKS.sale, "receipt", "Nouvelle vente")}
+          ${actionTile(BUSINESS_LINKS.arrival, "truck", "Nouvel arrivage")}
+          ${actionTile(BUSINESS_LINKS.expenses, "wallet", "Dépense")}
+          ${actionTile(BUSINESS_LINKS.receivables, "hand-coins", "Paiement")}
+        </div>
+      </section>
+
+      <article class="list-card">
+        <div class="section-head" style="padding:0.9rem 1rem 0">
+          <h2 class="section-title">Aujourd'hui</h2>
+        </div>
+        <div class="today-metrics">
+          ${todayRow("Ventes", todayReport.revenue)}
+          ${todayRow("Cash reçu", todayReport.cashCollected)}
+          ${todayRow("Crédit des ventes", todayReport.creditIssued)}
+        </div>
       </article>
-    </div>
 
-    <article class="card">
-      <p class="home-metric-label">Stock restant</p>
-      <p class="metric-plain">${escapeHtml(String(report.stockUnits))} ${report.stockUnits > 1 ? "unités" : "unité"}</p>
-      ${stockHint ? `<p class="field-hint">${escapeHtml(stockHint)}</p>` : ""}
-    </article>
+      <article class="list-card">
+        <div class="section-head" style="padding:0.9rem 1rem 0">
+          <h2 class="section-title">À surveiller</h2>
+        </div>
+        <div class="watch-list">
+          ${watchRow(BUSINESS_LINKS.receivables, "users", "Clients qui doivent", monthReport.receivablesTotal, owing.length)}
+          ${watchRow(BUSINESS_LINKS.payables, "truck", "Fournisseurs à payer", monthReport.payablesTotal, payable.length)}
+          ${stockWatchHtml({
+            href: BUSINESS_LINKS.stock,
+            inventory: monthReport.inventory,
+            stockUnits: monthReport.stockUnits,
+          })}
+        </div>
+      </article>
 
-    <div class="stack business-actions">
-      <a class="btn btn-primary btn-block" href="#${BUSINESS_LINKS.sale}">+ Nouvelle vente</a>
-      <a class="btn btn-secondary btn-block" href="#${BUSINESS_LINKS.arrival}">+ Nouvel arrivage</a>
-      <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.customers}">Clients</a>
-      <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.suppliers}">Fournisseurs</a>
-      <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.stock}">Stock</a>
-      <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.expenses}">Dépenses</a>
-      <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.bordereaux}">Bordereaux</a>
-      <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.history}">Historique</a>
-      <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.report}">Rapport</a>
+      <article class="chart-card dashboard-span">
+        <h2 class="section-title">Ventes et dépenses du mois</h2>
+        <div class="chart-frame">
+          <canvas data-role="month-chart" aria-label="Ventes et dépenses du mois"></canvas>
+        </div>
+      </article>
     </div>
   `;
 }
 
-function metricRow(label, amount) {
+function actionTile(href, icon, label) {
   return `
-    <p class="home-metric-label">${escapeHtml(label)}</p>
-    <div>${amountHtml(amount, { className: "amount-sm" })}</div>
+    <a class="action-card" href="#${href}">
+      <span class="action-card-icon">${iconHtml(icon, { weight: "bold", size: "md" })}</span>
+      <span>${escapeHtml(label)}</span>
+    </a>
   `;
+}
+
+function todayRow(label, amount) {
+  return `
+    <div class="today-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(formatFcfa(amount))}</strong>
+    </div>
+  `;
+}
+
+function watchRow(href, icon, label, amount, count) {
+  return `
+    <a class="list-row" href="#${href}">
+      <span class="list-row-icon">${iconHtml(icon, { weight: "bold" })}</span>
+      <span class="list-row-body">
+        <span class="list-row-title">${escapeHtml(label)}</span>
+        <span class="list-row-meta">${count} dossier${count > 1 ? "s" : ""}</span>
+      </span>
+      <span class="list-row-amount">${escapeHtml(formatFcfa(amount))}</span>
+    </a>
+  `;
+}
+
+function saleAmount(sale) {
+  return saleItemsTotal(sale);
+}
+
+function bindCharts(body, monthReport) {
+  const sales = weeklySeriesFromRows(monthReport.sales, (row) => row.sale_date, saleAmount);
+  const expenses = weeklySeriesFromRows(
+    (monthReport.expenses || []).filter((row) => !row.is_arrival_cost_allocation),
+    (row) => row.expense_date,
+    (row) => row.amount_fcfa,
+  );
+  renderGroupedBarChart(body.querySelector('[data-role="month-chart"]'), {
+    labels: sales.labels,
+    series: [
+      { label: "Ventes", values: sales.values, color: "#F28C28" },
+      { label: "Dépenses", values: expenses.values, color: "#C56A12" },
+    ],
+  });
 }

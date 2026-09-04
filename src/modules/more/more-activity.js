@@ -1,4 +1,5 @@
 import { getAuditEvents, AUDIT_PAGE_SIZE } from "../../services/supabase/audit-read.js";
+import { getActiveDomain } from "../../state/app-mode.js";
 import { formatAuditDetailPairs } from "../../utils/audit-format.js";
 import { formatDateTimeFr } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
@@ -15,9 +16,12 @@ export function renderActivity(root) {
   root.innerHTML = `
     <section class="page more-page" aria-labelledby="more-title">
       ${pageHeaderHtml({
-        kicker: "Journal",
-        title: "Activité",
-        subtitle: "Modifications et suppressions importantes, en français simple.",
+        kicker: "Plus",
+        title: "Journal d’activité",
+        subtitle:
+          getActiveDomain() === "church"
+            ? "Modifications de la trésorerie, en français simple."
+            : "Modifications du commerce, en français simple.",
         backHref: "/plus",
         titleId: "more-title",
       })}
@@ -36,6 +40,7 @@ async function loadPage(root, reset) {
     const page = await getAuditEvents({
       offset: reset ? 0 : offset,
       limit: AUDIT_PAGE_SIZE,
+      domain: getActiveDomain(),
     });
     items = reset ? page.items : [...items, ...page.items];
     offset = items.length;
@@ -60,7 +65,7 @@ function renderList(listEl, root) {
   }
 
   listEl.innerHTML = `
-    <div class="tx-list">
+    <div class="list-stack">
       ${items.map(activityCardHtml).join("")}
     </div>
     ${

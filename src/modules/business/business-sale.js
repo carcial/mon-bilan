@@ -1,4 +1,7 @@
 import { amountHtml } from "../../components/amount.js";
+import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field.js";
+import { bindCustomerCombobox, customerComboboxHtml } from "../../components/customer-combobox.js";
+import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { confirmAndWrite } from "../../components/confirm-modal.js";
 import { navigate, ROUTES } from "../../router.js";
 import {
@@ -11,27 +14,31 @@ import {
   calculateLineMargin,
   calculateSaleReceivable,
   calculateSaleTotal,
-  calculateUnitMargin,
-  inferPaymentMethod,
+  inferSettlementStatus,
   isSaleAtLoss,
+  paidNowForSettlement,
   validateSale,
 } from "../../utils/business-calc.js";
-import { formatLongDateFr, todayIso } from "../../utils/dates.js";
+import { displayDateFr, todayIso } from "../../utils/dates.js";
+import { supplierDisplayLabel } from "../../utils/supplier-label.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
-import { formatFcfa } from "../../utils/money.js";
+import { formatFcfa, toFcfaInteger } from "../../utils/money.js";
 import { createSubmitGuard } from "../../utils/submit-guard.js";
 import { businessSuccessPath } from "./business-routes.js";
 import {
   bindIntegerInput,
   bindMoneyInput,
+  BUSINESS_LINKS,
   clearFieldErrors,
   errorStateHtml,
+  METHOD_LABELS,
+  methodCardsHtml,
   moneyInputHtml,
   pageHeaderHtml,
-  PAYMENT_LABELS,
-  selectHtml,
+  SETTLEMENT_LABELS,
   setFieldError,
   skeletonHtml,
+  supplierAmountPerUnitLabel,
   unitLabel,
 } from "./business-ui.js";
 
@@ -40,10 +47,7 @@ const draft = { current: null };
 export function renderSaleForm(root, ctx = {}) {
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      ${pageHeaderHtml({
-        title: "Nouvelle vente",
-        backHref: ROUTES.business,
-      })}
+      ${pageHeaderHtml({ title: "Nouvelle vente", backHref: ROUTES.business, backLabel: "Retour au commerce" })}
       <div data-role="body">${skeletonHtml(5)}</div>
     </section>
   `;
@@ -54,7 +58,7 @@ async function loadForm(body, ctx) {
   if (!body) return;
   try {
     const [customers, products] = await Promise.all([getCustomers(), getProducts()]);
-    const productId = draft.current?.productId || products[0]?.id || "";
+    const productId = draft.current?.productId || (products.length === 1 ? products[0].id : "");
     const batches = productId ? await getAvailableBatches(productId) : [];
     body.innerHTML = formHtml({ customers, products, batches, draft: draft.current });
     bindForm(body, { customers, products, batches, onChanged: ctx.onChanged });
@@ -68,110 +72,144 @@ async function loadForm(body, ctx) {
 }
 
 function formHtml({ customers, products, batches, draft: d }) {
+  const selectedProduct = d?.productId || (products.length === 1 ? products[0].id : "");
+  const settlement = d?.settlementStatus || "paid";
+  const method = d?.paymentMethod || "cash";
   return `
-    <form class="church-form stack" data-role="form" novalidate>
-      <div class="field">
-        <label class="field-label" for="sale-customer">Client</label>
-        <select id="sale-customer" name="customerId" class="field-input">
-          <option value="__new__">+ Nouveau client</option>
-          ${selectHtml(customers, d?.customerId || customers[0]?.id)}
-        </select>
-        <p class="field-error" data-error="customerId" hidden></p>
-      </div>
-      <div class="stack-sm" data-role="new-customer" hidden>
-        <div class="field">
-          <label class="field-label" for="sale-new-name">Nom du client</label>
-          <input id="sale-new-name" name="newCustomerName" class="field-input" value="${escapeHtml(d?.newCustomerName || "")}" />
+    <form class="church-form sale-form stack" data-role="form" novalidate>
+      <section class="form-section">
+        <h2 class="form-section-title">Client</h2>
+        ${customerComboboxHtml({
+          customers,
+          selectedId: d?.customerId || "",
+          query: d?.newCustomerName || "",
+          hideLabel: true,
+        })}
+      </section>
+
+      <section class="form-section">
+        <h2 class="form-section-title">Marchandise</h2>
+        ${choiceFieldHtml({
+          id: "sale-product",
+          name: "productId",
+          label: "Produit",
+          options: products,
+          selectedId: selectedProduct,
+          placeholder: "Choisir un produit",
+          labelFn: (p) => p.name,
+          emptyTitle: "Aucun produit disponible.",
+          emptyHref: BUSINESS_LINKS.productNew,
+          emptyLabel: "Ajouter",
+        })}
+        <div data-role="batch-field">
+          ${batchFieldHtml(batches, d?.arrivalId)}
         </div>
         <div class="field">
-          <label class="field-label" for="sale-new-phone">Téléphone <span class="field-optional">(facultatif)</span></label>
-          <input id="sale-new-phone" name="newCustomerPhone" class="field-input" value="${escapeHtml(d?.newCustomerPhone || "")}" />
+          <label class="field-label" for="sale-qty">Quantité</label>
+          <input id="sale-qty" name="quantity" class="field-input" inputmode="numeric" data-int="true" placeholder="Ex. 5" value="${escapeHtml(d?.quantity || "")}" />
+          <p class="field-error" data-error="quantity" hidden></p>
         </div>
-      </div>
+        ${moneyInputHtml("sale-price", "unitPrice", "Prix de vente")}
+      </section>
 
-      <div class="field">
-        <label class="field-label" for="sale-product">Produit</label>
-        <select id="sale-product" name="productId" class="field-input">
-          ${selectHtml(products, d?.productId || products[0]?.id, {
-            labelFn: (p) => `${p.name} (${p.unit_type})`,
-          })}
-        </select>
-        <p class="field-error" data-error="productId" hidden></p>
-      </div>
+      <section class="form-section">
+        <h2 class="form-section-title">Paiement</h2>
+        <p class="field-label">Statut</p>
+        <div class="segmented" role="radiogroup" aria-label="Statut">
+          ${[
+            ["paid", "Payé"],
+            ["partial", "Partiel"],
+            ["credit", "Crédit"],
+          ]
+            .map(
+              ([value, label]) => `
+            <button type="button" class="segmented-btn${settlement === value ? " is-active" : ""}" data-settlement="${value}">
+              ${escapeHtml(label)}
+            </button>
+          `,
+            )
+            .join("")}
+        </div>
+        <input type="hidden" name="settlementStatus" value="${escapeHtml(settlement)}" />
+        <p class="field-error" data-error="settlementStatus" hidden></p>
 
-      <div class="field">
-        <label class="field-label" for="sale-batch">Bordereau / lot</label>
-        <select id="sale-batch" name="arrivalId" class="field-input">
-          ${batchOptions(batches, d?.arrivalId)}
-        </select>
-        <p class="field-hint" data-role="batch-hint"></p>
-        <p class="field-error" data-error="arrivalId" hidden></p>
-      </div>
+        <div data-role="paid-field">
+          ${moneyInputHtml("sale-paid", "amountPaid", "Montant payé maintenant")}
+        </div>
 
-      <div class="field">
-        <label class="field-label" for="sale-qty">Quantité</label>
-        <input id="sale-qty" name="quantity" class="field-input" inputmode="numeric" data-int="true" value="${escapeHtml(d?.quantity || "")}" />
-        <p class="field-error" data-error="quantity" hidden></p>
-      </div>
-      ${moneyInputHtml("sale-price", "unitPrice", "Prix de vente unitaire")}
-      <div class="field">
-        <label class="field-label" for="sale-date">Date</label>
-        <input id="sale-date" name="date" type="date" class="field-input" value="${escapeHtml(d?.date || todayIso())}" />
-        <p class="field-error" data-error="date" hidden></p>
-      </div>
-      <div class="field">
-        <label class="field-label" for="sale-method">Mode de paiement</label>
-        <select id="sale-method" name="paymentMethod" class="field-input">
-          <option value="cash">Espèces</option>
-          <option value="credit">Crédit</option>
-          <option value="partial">Paiement partiel</option>
-        </select>
-      </div>
-      ${moneyInputHtml("sale-paid", "amountPaid", "Montant payé maintenant")}
+        <div data-role="method-field">
+          ${methodCardsHtml(method)}
+        </div>
 
-      <div class="stack-sm" data-role="repay-fields">
+        <div class="stack-sm" data-role="repay-fields">
+          <p class="field-label">Échéance</p>
+          <div class="segmented segmented-wrap" role="radiogroup" aria-label="Type d'échéance">
+            ${[
+              ["exact", "Date précise"],
+              ["approximate", "Date approximative"],
+              ["undetermined", "Indéterminée"],
+            ]
+              .map(
+                ([value, label]) => `
+              <button type="button" class="segmented-btn${(d?.repaymentExpectation || "undetermined") === value ? " is-active" : ""}" data-due="${value}">
+                ${escapeHtml(label)}
+              </button>
+            `,
+              )
+              .join("")}
+          </div>
+          <input type="hidden" name="repaymentExpectation" value="${escapeHtml(d?.repaymentExpectation || "undetermined")}" />
+          <div class="is-hidden" data-role="exact-date">
+            ${dateFieldHtml({
+              id: "sale-exact",
+              name: "repaymentExactDate",
+              label: "Date prévue",
+              value: d?.repaymentExactDate || "",
+              defaultToday: false,
+            })}
+          </div>
+          <div class="field is-hidden" data-role="approx-text">
+            <label class="field-label" for="sale-approx">Période approximative</label>
+            <input id="sale-approx" name="repaymentApproxText" class="field-input" placeholder="Ex. Début octobre" value="${escapeHtml(d?.repaymentApproxText || "")}" />
+            <p class="field-error" data-error="repaymentApproxText" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <h2 class="form-section-title">Date et note</h2>
+        ${dateFieldHtml({
+          id: "sale-date",
+          name: "date",
+          label: "Date",
+          value: d?.date || todayIso(),
+        })}
         <div class="field">
-          <label class="field-label" for="sale-repay">Remboursement prévu</label>
-          <select id="sale-repay" name="repaymentExpectation" class="field-input">
-            <option value="undetermined">Non déterminé</option>
-            <option value="exact">Date exacte</option>
-            <option value="approximate">Date approximative</option>
-          </select>
+          <label class="field-label" for="sale-note">Note <span class="field-optional">(facultatif)</span></label>
+          <textarea id="sale-note" name="note" class="field-input field-textarea" rows="2" placeholder="Ex. Paiement prévu vendredi"></textarea>
         </div>
-        <div class="field is-hidden" data-role="exact-date">
-          <label class="field-label" for="sale-exact">Date exacte</label>
-          <input id="sale-exact" name="repaymentExactDate" type="date" class="field-input" />
-          <p class="field-error" data-error="repaymentExactDate" hidden></p>
-        </div>
-        <div class="field is-hidden" data-role="approx-text">
-          <label class="field-label" for="sale-approx">Période approximative</label>
-          <input id="sale-approx" name="repaymentApproxText" class="field-input" placeholder="Fin du mois, semaine prochaine…" />
-          <p class="field-error" data-error="repaymentApproxText" hidden></p>
-        </div>
-      </div>
+      </section>
 
-      <div class="field">
-        <label class="field-label" for="sale-note">Note <span class="field-optional">(facultatif)</span></label>
-        <textarea id="sale-note" name="note" class="field-input field-textarea" rows="3"></textarea>
-      </div>
-      <div class="card recon-preview" data-role="preview"></div>
+      <div class="card recon-preview form-summary" data-role="preview"></div>
       <p class="form-alert" data-role="form-error" hidden></p>
       <button type="submit" class="btn btn-primary btn-block">Continuer</button>
     </form>
   `;
 }
 
-function batchOptions(batches, selectedId) {
-  if (!batches.length) {
-    return `<option value="">Aucun lot disponible</option>`;
-  }
-  return batches
-    .map((b) => {
-      const selected = b.id === selectedId ? " selected" : "";
-      const supplier = b.suppliers?.code || b.suppliers?.name || "Lot";
-      return `<option value="${escapeHtml(b.id)}"${selected}>${escapeHtml(supplier)} — ${b.quantity_remaining} dispo</option>`;
-    })
-    .join("");
+function batchFieldHtml(batches, selectedId) {
+  return choiceFieldHtml({
+    id: "sale-batch",
+    name: "arrivalId",
+    label: "Lot",
+    options: batches,
+    selectedId: selectedId || (batches.length === 1 ? batches[0].id : ""),
+    placeholder: "Choisir un lot",
+    labelFn: (b) => `${supplierDisplayLabel(b.suppliers) || "Lot"} · ${b.quantity_remaining} dispo`,
+    emptyTitle: "Aucun lot disponible.",
+    emptyHref: BUSINESS_LINKS.arrival,
+    emptyLabel: "Arrivage",
+  });
 }
 
 function readForm(form) {
@@ -179,17 +217,16 @@ function readForm(form) {
     const el = form.elements.namedItem(name);
     return el instanceof HTMLInputElement ? el.dataset.amount || el.value : "";
   };
-  const customerId = String(form.elements.namedItem("customerId")?.value || "");
   return {
-    customerId: customerId === "__new__" ? "" : customerId,
+    customerId: String(form.elements.namedItem("customerId")?.value || ""),
     newCustomerName: String(form.elements.namedItem("newCustomerName")?.value || ""),
-    newCustomerPhone: String(form.elements.namedItem("newCustomerPhone")?.value || ""),
     productId: String(form.elements.namedItem("productId")?.value || ""),
     arrivalId: String(form.elements.namedItem("arrivalId")?.value || ""),
     quantity: form.elements.namedItem("quantity")?.dataset?.amount
       || form.elements.namedItem("quantity")?.value,
     unitPrice: money("unitPrice"),
     date: String(form.elements.namedItem("date")?.value || ""),
+    settlementStatus: String(form.elements.namedItem("settlementStatus")?.value || "paid"),
     paymentMethod: String(form.elements.namedItem("paymentMethod")?.value || "cash"),
     amountPaid: money("amountPaid"),
     repaymentExpectation: String(form.elements.namedItem("repaymentExpectation")?.value || "undetermined"),
@@ -204,35 +241,63 @@ function bindForm(body, ctx) {
   if (!form) return;
   form.querySelectorAll("[data-money]").forEach((el) => bindMoneyInput(el));
   form.querySelectorAll("[data-int]").forEach((el) => bindIntegerInput(el));
+  bindCustomerCombobox(form, ctx.customers);
+  bindChoiceFields(form);
+  bindDateFields(form);
   const guard = createSubmitGuard();
 
   const syncUi = async () => {
     const values = readForm(form);
     draft.current = values;
-    const newBox = form.querySelector('[data-role="new-customer"]');
-    if (newBox) {
-      newBox.hidden = Boolean(form.elements.namedItem("customerId")?.value !== "__new__");
-    }
     const expect = values.repaymentExpectation;
+    const hasBalance = values.settlementStatus !== "paid";
     form.querySelector('[data-role="exact-date"]')?.classList.toggle("is-hidden", expect !== "exact");
     form.querySelector('[data-role="approx-text"]')?.classList.toggle("is-hidden", expect !== "approximate");
+    form.querySelector('[data-role="paid-field"]')?.classList.toggle("is-hidden", values.settlementStatus !== "partial");
+    form.querySelector('[data-role="method-field"]')?.classList.toggle("is-hidden", values.settlementStatus === "credit");
+    form.querySelector('[data-role="repay-fields"]')?.classList.toggle("is-hidden", !hasBalance);
 
     const batch = ctx.batches.find((b) => b.id === values.arrivalId);
-    const hint = form.querySelector('[data-role="batch-hint"]');
-    if (hint && batch) {
-      hint.textContent = `${batch.suppliers?.code || ""} · ${batch.quantity_remaining} ${unitLabel(batch.products?.unit_type, batch.quantity_remaining)} disponibles · Coût réel : ${batch.effective_unit_cost_fcfa == null ? "—" : formatFcfa(batch.effective_unit_cost_fcfa)} / ${unitLabel(batch.products?.unit_type)}`;
-    } else if (hint) {
-      hint.textContent = "Aucun bordereau disponible pour ce produit.";
-    }
     const preview = form.querySelector('[data-role="preview"]');
     if (preview) preview.innerHTML = salePreviewHtml(values, batch);
   };
 
+  form.querySelectorAll("[data-settlement]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      form.elements.namedItem("settlementStatus").value = btn.getAttribute("data-settlement");
+      form.querySelectorAll("[data-settlement]").forEach((el) => {
+        el.classList.toggle("is-active", el === btn);
+      });
+      syncUi();
+    });
+  });
+  form.querySelectorAll("[data-method]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      form.elements.namedItem("paymentMethod").value = btn.getAttribute("data-method");
+      form.querySelectorAll("[data-method]").forEach((el) => {
+        el.classList.toggle("is-active", el === btn);
+      });
+      syncUi();
+    });
+  });
+  form.querySelectorAll("[data-due]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      form.elements.namedItem("repaymentExpectation").value = btn.getAttribute("data-due");
+      form.querySelectorAll("[data-due]").forEach((el) => {
+        el.classList.toggle("is-active", el === btn);
+      });
+      syncUi();
+    });
+  });
+
   form.elements.namedItem("productId")?.addEventListener("change", async () => {
     const productId = form.elements.namedItem("productId")?.value;
     ctx.batches = productId ? await getAvailableBatches(productId) : [];
-    const select = form.elements.namedItem("arrivalId");
-    if (select) select.innerHTML = batchOptions(ctx.batches, ctx.batches[0]?.id);
+    const holder = form.querySelector('[data-role="batch-field"]');
+    if (holder) {
+      holder.innerHTML = batchFieldHtml(ctx.batches, ctx.batches[0]?.id);
+      bindChoiceFields(holder);
+    }
     syncUi();
   });
 
@@ -248,32 +313,44 @@ function bindForm(body, ctx) {
 }
 
 function salePreviewHtml(values, batch) {
-  const qty = Number(values.quantity) || 0;
-  if (!qty || !values.unitPrice) return `<p class="field-hint">Le résumé apparaîtra après la quantité et le prix.</p>`;
+  const qty = toFcfaInteger(values.quantity);
+  if (!qty || !values.unitPrice) return `<p class="field-hint">Le résumé apparaîtra après la quantité et le prix de vente.</p>`;
   const total = calculateSaleTotal(values.quantity, values.unitPrice);
+  const settlement = values.settlementStatus || inferSettlementStatus(total, values.amountPaid);
+  const paidNow = paidNowForSettlement(settlement, total, values.amountPaid);
   const recv = calculateSaleReceivable({
     quantity: values.quantity,
     unitPrice: values.unitPrice,
-    amountPaid: values.amountPaid,
+    amountPaid: paidNow,
   });
-  const cost = batch?.effective_unit_cost_fcfa;
-  const loss = cost != null && isSaleAtLoss(values.unitPrice, cost);
-  const margin = cost == null ? null : calculateLineMargin(qty, values.unitPrice, cost);
+  const supplierAmount = batch?.supplier_unit_price_fcfa;
+  const unitType = batch?.products?.unit_type;
+  const loss = supplierAmount != null && isSaleAtLoss(values.unitPrice, supplierAmount);
+  const margin =
+    supplierAmount == null
+      ? null
+      : calculateLineMargin(qty, values.unitPrice, supplierAmount);
   return `
+    ${loss ? saleLossHtml() : ""}
     ${
-      loss
-        ? `<div class="warning-box" role="alert">
-            <p class="warning-box-title">⚠ VENTE À PERTE</p>
-            <p>Coût réel : ${escapeHtml(formatFcfa(cost))} / unité</p>
-            <p>Prix de vente : ${escapeHtml(formatFcfa(values.unitPrice))}</p>
-            <p>Perte estimée : ${escapeHtml(formatFcfa(calculateUnitMargin(values.unitPrice, cost)))} / unité</p>
-          </div>`
-        : ""
+      supplierAmount == null
+        ? ""
+        : `<p>${escapeHtml(supplierAmountPerUnitLabel(unitType))} : ${escapeHtml(formatFcfa(supplierAmount))}</p>`
     }
-    <p>Total : <strong>${escapeHtml(formatFcfa(total))}</strong></p>
+    <p>Prix de vente : ${escapeHtml(formatFcfa(values.unitPrice))}</p>
+    <p>Total vente : <strong>${escapeHtml(formatFcfa(total))}</strong></p>
     <p>Payé maintenant : ${escapeHtml(formatFcfa(recv.paid))}</p>
-    <p>Reste client : ${escapeHtml(formatFcfa(recv.remaining))}</p>
+    <p>Reste à payer : ${escapeHtml(formatFcfa(recv.remaining))}</p>
     ${margin == null ? "" : `<p>Marge estimée : ${escapeHtml(formatFcfa(margin))}</p>`}
+  `;
+}
+
+function saleLossHtml() {
+  return `
+    <div class="alert-card alert-card-danger" role="alert">
+      <p class="warning-box-title">Vente à perte</p>
+      <p>Cette vente est inférieure au montant fournisseur par sac.</p>
+    </div>
   `;
 }
 
@@ -292,63 +369,64 @@ async function handleSubmit(form, ctx) {
 
   const product = ctx.products.find((p) => p.id === values.productId);
   const customer = ctx.customers.find((c) => c.id === values.customerId);
-  const cost = batch?.effective_unit_cost_fcfa;
-  const loss = cost != null && isSaleAtLoss(validated.unitPrice, cost);
-  let amountPaid = validated.amountPaid;
-  if (values.paymentMethod === "cash" && amountPaid === 0) {
-    amountPaid = validated.total;
-  }
+  const supplierAmount = batch?.supplier_unit_price_fcfa;
+  const unitType = product?.unit_type;
+  const loss = supplierAmount != null && isSaleAtLoss(validated.unitPrice, supplierAmount);
+  const amountPaid = validated.amountPaid;
   const recv = calculateSaleReceivable({
     quantity: validated.quantity,
     unitPrice: validated.unitPrice,
     amountPaid,
   });
-  const method =
-    values.paymentMethod === "credit" && amountPaid === 0
-      ? "credit"
-      : inferPaymentMethod(recv.total, amountPaid);
+  const margin =
+    supplierAmount == null
+      ? null
+      : calculateLineMargin(validated.quantity, validated.unitPrice, supplierAmount);
 
-  const extraHtml = loss
-    ? `<div class="warning-box" role="alert">
-        <p class="warning-box-title">⚠ VENTE À PERTE</p>
-        <p>Coût réel : ${escapeHtml(formatFcfa(cost))} / ${escapeHtml(unitLabel(product?.unit_type))}</p>
-        <p>Prix de vente : ${escapeHtml(formatFcfa(validated.unitPrice))}</p>
-        <p>Perte / unité : ${escapeHtml(formatFcfa(calculateUnitMargin(validated.unitPrice, cost)))}</p>
-        <p>Perte totale : ${escapeHtml(formatFcfa(calculateLineMargin(validated.quantity, validated.unitPrice, cost)))}</p>
-      </div>`
-    : "";
+  const extraHtml = loss ? saleLossHtml() : "";
 
   const result = await confirmAndWrite(
     {
-      title: "CONFIRMER LA VENTE",
+      title: "Confirmer la vente",
       amountHtml: amountHtml(recv.total),
       extraHtml,
+      confirmLabel: "Confirmer",
+      cancelLabel: "Modifier",
       rows: [
         { label: "Client", value: customer?.name || values.newCustomerName || "Nouveau client" },
         { label: "Produit", value: product?.name || "—" },
-        { label: "Lot", value: batch?.suppliers?.code || "—" },
-        { label: "Quantité", value: `${validated.quantity} ${unitLabel(product?.unit_type, validated.quantity)}` },
-        { label: "Prix unitaire", value: formatFcfa(validated.unitPrice) },
-        { label: "Paiement", value: PAYMENT_LABELS[method] || method },
+        { label: "Lot", value: supplierDisplayLabel(batch?.suppliers) || "—" },
+        { label: "Quantité", value: `${validated.quantity} ${unitLabel(unitType, validated.quantity)}` },
+        {
+          label: supplierAmountPerUnitLabel(unitType),
+          value: supplierAmount == null ? "—" : formatFcfa(supplierAmount),
+        },
+        { label: "Prix de vente", value: formatFcfa(validated.unitPrice) },
+        { label: "Marge estimée", value: margin == null ? "—" : formatFcfa(margin) },
+        { label: "Statut", value: SETTLEMENT_LABELS[validated.settlement] || validated.settlement },
+        {
+          label: "Mode",
+          value: validated.method ? METHOD_LABELS[validated.method] || validated.method : "—",
+        },
         { label: "Payé maintenant", value: formatFcfa(amountPaid) },
         { label: "Reste", value: formatFcfa(recv.remaining) },
-        { label: "Date", value: formatLongDateFr(values.date) },
+        { label: "Date", value: displayDateFr(values.date) },
       ],
     },
     async () =>
       createSale({
         customerId: values.customerId || null,
         newCustomerName: values.newCustomerName,
-        newCustomerPhone: values.newCustomerPhone,
         productId: values.productId,
         arrivalId: values.arrivalId,
         quantity: validated.quantity,
         unitPrice: validated.unitPrice,
-        effectiveUnitCost: cost,
+        effectiveUnitCost: batch?.effective_unit_cost_fcfa ?? null,
         date: values.date,
-        paymentMethod: method,
+        settlementStatus: validated.settlement,
+        paymentMethod: validated.method,
         amountPaid,
-        repaymentExpectation: values.repaymentExpectation,
+        repaymentExpectation: values.settlementStatus === "paid" ? "undetermined" : values.repaymentExpectation,
         repaymentExactDate: values.repaymentExactDate || null,
         repaymentApproxText: values.repaymentApproxText || null,
         note: values.note,

@@ -57,6 +57,7 @@ export function buildGlobalReport(input = {}) {
       cashCollected: businessTotals.cashCollected,
       creditIssued: businessTotals.creditIssued,
       cogs: businessTotals.cogs,
+      grossMargin: businessTotals.grossMargin,
       operatingExpenses: businessTotals.operatingExpenses,
       estimatedProfit: businessTotals.estimatedProfit,
       unitsSold: businessTotals.unitsSold,

@@ -1,23 +1,15 @@
 import { escapeHtml } from "../../utils/errors.js";
 import { HISTORY_TYPE_LABELS } from "../../utils/history-events.js";
+import { iconHtml } from "../../components/icons.js";
+import { pageHeaderHtml as sharedPageHeaderHtml, backLinkHtml } from "../../components/page-header.js";
 
-export function backLinkHtml(href, label = "Retour") {
-  return `
-    <a class="back-link" href="#${href}">
-      <span aria-hidden="true">←</span> ${escapeHtml(label)}
-    </a>
-  `;
-}
+export { backLinkHtml };
 
-export function pageHeaderHtml({ kicker, title, subtitle, backHref, backLabel, titleId = "history-title" }) {
-  return `
-    <header class="page-header">
-      ${backHref ? backLinkHtml(backHref, backLabel || "Retour") : ""}
-      ${kicker ? `<p class="page-kicker">${escapeHtml(kicker)}</p>` : ""}
-      <h1 class="page-title" id="${titleId}">${escapeHtml(title)}</h1>
-      ${subtitle ? `<p class="page-subtitle">${escapeHtml(subtitle)}</p>` : ""}
-    </header>
-  `;
+export function pageHeaderHtml(props = {}) {
+  return sharedPageHeaderHtml({
+    titleId: "history-title",
+    ...props,
+  });
 }
 
 export function skeletonHtml(lines = 3) {
@@ -54,9 +46,9 @@ export function errorStateHtml(message) {
 
 export function domainBadgeHtml(domain) {
   if (domain === "business") {
-    return `<span class="origin-badge origin-business"><span aria-hidden="true">🛒</span> COMMERCE</span>`;
+    return `<span class="origin-badge origin-business">${iconHtml("storefront", { weight: "fill", size: "sm" })} COMMERCE</span>`;
   }
-  return `<span class="origin-badge origin-church"><span aria-hidden="true">⛪</span> ÉGLISE</span>`;
+  return `<span class="origin-badge origin-church">${iconHtml("church", { weight: "fill", size: "sm" })} ÉGLISE</span>`;
 }
 
 export function typeBadgeHtml(type) {
@@ -64,8 +56,8 @@ export function typeBadgeHtml(type) {
   const isOut = type === "expense" || type === "supplier_payment" || type === "business_expense" || type === "arrival";
   const isIn = type === "income" || type === "sale" || type === "customer_payment";
   const cls = isOut ? "tx-kind-out" : isIn ? "tx-kind-in" : "tx-kind-neutral";
-  const icon = isOut ? "↓" : isIn ? "↑" : "•";
-  return `<span class="tx-kind ${cls}"><span aria-hidden="true">${icon}</span> ${escapeHtml(label.toUpperCase())}</span>`;
+  const icon = isOut ? "arrow-up" : isIn ? "arrow-down" : "dot";
+  return `<span class="tx-kind ${cls}">${iconHtml(icon, { weight: "bold", size: "sm" })} ${escapeHtml(label.toUpperCase())}</span>`;
 }
 
 export function selectOptionsHtml(rows, selectedId, { valueKey = "id", labelFn, includeAll, allLabel } = {}) {

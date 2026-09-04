@@ -2,7 +2,7 @@
  * Centralized period helpers — Monday-start weeks, device-local dates.
  */
 
-import { parseLocalDate, toIsoDate } from "./dates.js";
+import { formatNumericDateFr, parseLocalDate, toIsoDate } from "./dates.js";
 
 export const PERIODS = {
   today: "today",
@@ -121,7 +121,7 @@ export function periodLabelFr(period, options = {}) {
     case PERIODS.custom: {
       const from = options.from;
       const to = options.to;
-      if (from && to) return `${from} → ${to}`;
+      if (from && to) return `${formatNumericDateFr(from)} → ${formatNumericDateFr(to)}`;
       return "Période personnalisée";
     }
     default:

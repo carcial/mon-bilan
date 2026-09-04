@@ -1,5 +1,11 @@
-/* Mon Bilan service worker — cache app shell and static assets only, never Supabase data */
-const CACHE_VERSION = "mon-bilan-shell-v3";
+/* Mon Bilan service worker
+ * - Cache app shell and static assets only, never Supabase data
+ * - Background push reminders via Firebase Messaging (same worker, same scope)
+ *
+ * Firebase public web config is injected at build/dev time.
+ * Never put service-account keys here.
+ */
+const CACHE_VERSION = "mon-bilan-shell-v4";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -81,5 +87,65 @@ self.addEventListener("fetch", (event) => {
         return response;
       });
     }),
+  );
+});
+
+const firebaseConfig = {
+  apiKey: "__VITE_FIREBASE_API_KEY__",
+  authDomain: "__VITE_FIREBASE_AUTH_DOMAIN__",
+  projectId: "__VITE_FIREBASE_PROJECT_ID__",
+  storageBucket: "__VITE_FIREBASE_STORAGE_BUCKET__",
+  messagingSenderId: "__VITE_FIREBASE_MESSAGING_SENDER_ID__",
+  appId: "__VITE_FIREBASE_APP_ID__",
+};
+
+const hasFirebase =
+  Boolean(firebaseConfig.apiKey) &&
+  Boolean(firebaseConfig.authDomain) &&
+  Boolean(firebaseConfig.projectId) &&
+  Boolean(firebaseConfig.storageBucket) &&
+  Boolean(firebaseConfig.messagingSenderId) &&
+  Boolean(firebaseConfig.appId);
+
+if (hasFirebase) {
+  try {
+    importScripts("https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js");
+    importScripts("https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging-compat.js");
+    const app = firebase.initializeApp(firebaseConfig);
+    const messaging = firebase.messaging(app);
+    messaging.onBackgroundMessage((payload) => {
+      const data = (payload && payload.data) || {};
+      const title = data.title || "Rappel";
+      const body = data.body || "";
+      const url = data.url;
+      const tag = data.dedup_key || "push";
+      self.registration.showNotification(title, {
+        body,
+        tag,
+        data: { url },
+      });
+    });
+  } catch (_err) {
+    /* keep caching working even if messaging scripts fail */
+  }
+}
+
+self.addEventListener("notificationclick", (event) => {
+  const url = event.notification && event.notification.data && event.notification.data.url;
+  event.notification.close();
+  if (!url) return;
+
+  event.waitUntil(
+    (async () => {
+      const allClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      const origin = self.location.origin;
+      const sameOriginClient = allClients.find((c) => c.url && c.url.startsWith(origin));
+      if (sameOriginClient) {
+        sameOriginClient.postMessage({ type: "PUSH_NOTIFICATION_CLICK", url });
+        sameOriginClient.focus();
+        return;
+      }
+      await self.clients.openWindow(url);
+    })(),
   );
 });

@@ -41,7 +41,6 @@ async function loadSuccess(body, ctx) {
     body.innerHTML = `
       <div class="success-panel">
         <p class="success-title">
-          <span aria-hidden="true">✓</span>
           ${isExpense ? "Sortie enregistrée" : "Entrée enregistrée"}
         </p>
         <div>${amountHtml(tx.amount_fcfa)}</div>

@@ -23,3 +23,6 @@ port = 54323
 
 [auth]
 enabled = false
+
+[functions.send-push-reminders]
+verify_jwt = false

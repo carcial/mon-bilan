@@ -3,8 +3,11 @@
  * Never merge Church and Business money. Domain is always explicit.
  */
 
+import { calculateMerchandiseValue, saleItemsTotal } from "./business-calc.js";
 import { toFcfaInteger } from "./money.js";
 import { isDateInRange } from "./periods.js";
+import { normalizePersonName } from "./choice-ui.js";
+import { supplierDisplayLabel } from "./supplier-label.js";
 
 export const HISTORY_DOMAINS = {
   church: "church",
@@ -26,7 +29,7 @@ export const HISTORY_TYPES = {
 export const HISTORY_TYPE_LABELS = {
   income: "Entrée",
   expense: "Sortie",
-  reconciliation: "Rapprochement",
+  reconciliation: "Vérification de caisse",
   arrival: "Arrivage",
   sale: "Vente",
   customer_payment: "Paiement client",
@@ -34,6 +37,57 @@ export const HISTORY_TYPE_LABELS = {
   business_expense: "Dépense",
   adjustment: "Ajustement stock",
 };
+
+export const CHURCH_HISTORY_TYPES = [
+  HISTORY_TYPES.income,
+  HISTORY_TYPES.expense,
+  HISTORY_TYPES.reconciliation,
+];
+
+export const BUSINESS_HISTORY_TYPES = [
+  HISTORY_TYPES.sale,
+  HISTORY_TYPES.arrival,
+  HISTORY_TYPES.customer_payment,
+  HISTORY_TYPES.supplier_payment,
+  HISTORY_TYPES.business_expense,
+  HISTORY_TYPES.adjustment,
+];
+
+export function historyTypesForDomain(domain) {
+  return domain === HISTORY_DOMAINS.church ? CHURCH_HISTORY_TYPES : BUSINESS_HISTORY_TYPES;
+}
+
+export function typeOptionsForDomain(domain) {
+  if (domain === HISTORY_DOMAINS.church) {
+    return [
+      ["", "Toutes"],
+      [HISTORY_TYPES.income, "Entrées"],
+      [HISTORY_TYPES.expense, "Sorties"],
+      [HISTORY_TYPES.reconciliation, "Vérification de caisse"],
+    ];
+  }
+  return [
+    ["", "Toutes"],
+    ...BUSINESS_HISTORY_TYPES.map((type) => [type, HISTORY_TYPE_LABELS[type]]),
+  ];
+}
+
+export function periodLabelCompact(period) {
+  switch (period) {
+    case "today":
+      return "Aujourd'hui";
+    case "week":
+      return "Cette semaine";
+    case "year":
+      return "Cette année";
+    case "custom":
+      return "Personnalisée";
+    case "all":
+      return "Toutes";
+    default:
+      return "Ce mois";
+  }
+}
 
 export const EXPENSE_CATEGORY_LABELS = {
   transport: "Transport",
@@ -67,11 +121,7 @@ export const EXPENSE_CATEGORY_LABELS = {
  */
 
 export function saleLineTotal(sale) {
-  return (sale?.sale_items || []).reduce(
-    (sum, item) =>
-      sum + toFcfaInteger(item.quantity) * toFcfaInteger(item.sale_unit_price_fcfa),
-    0,
-  );
+  return saleItemsTotal(sale);
 }
 
 function eventId(sourceTable, sourceId) {
@@ -105,6 +155,7 @@ export function normalizeChurchTransaction(row) {
     fundId: row.fund_id || null,
     supplierId: null,
     customerId: null,
+    productId: null,
     createdAt: row.created_at || row.transaction_date,
   };
 }
@@ -118,7 +169,7 @@ export function normalizeChurchReconciliation(row) {
     domain: HISTORY_DOMAINS.church,
     type: HISTORY_TYPES.reconciliation,
     date,
-    title: "Rapprochement de caisse",
+    title: "Vérification de caisse",
     subtitle: fundName,
     amount: diff,
     direction: diff === 0 ? "neutral" : diff < 0 ? "out" : "in",
@@ -129,15 +180,16 @@ export function normalizeChurchReconciliation(row) {
     fundId: row.fund_id || null,
     supplierId: null,
     customerId: null,
+    productId: null,
     createdAt: row.created_at || row.reconciled_at || date,
   };
 }
 
 export function normalizeArrival(row) {
-  const supplier = row.suppliers?.name || row.suppliers?.code || "Fournisseur";
+  const supplier = supplierDisplayLabel(row.suppliers) || "Fournisseur";
   const product = row.products?.name || "Produit";
   const qty = toFcfaInteger(row.quantity_received);
-  const merchandise = qty * toFcfaInteger(row.supplier_unit_price_fcfa);
+  const merchandise = calculateMerchandiseValue(qty, row.supplier_unit_price_fcfa);
   return {
     id: eventId("stock_arrivals", row.id),
     domain: HISTORY_DOMAINS.business,
@@ -154,6 +206,7 @@ export function normalizeArrival(row) {
     fundId: null,
     supplierId: row.supplier_id || null,
     customerId: null,
+    productId: row.product_id || row.products?.id || null,
     createdAt: row.created_at || row.arrival_date,
   };
 }
@@ -182,6 +235,7 @@ export function normalizeSale(row) {
     fundId: null,
     supplierId: firstItem?.stock_arrivals?.supplier_id || null,
     customerId: row.customer_id || null,
+    productId: firstItem?.product_id || firstItem?.products?.id || null,
     createdAt: row.created_at || row.sale_date,
   };
 }
@@ -204,12 +258,13 @@ export function normalizeCustomerPayment(row) {
     fundId: null,
     supplierId: null,
     customerId: row.customer_id || null,
+    productId: null,
     createdAt: row.created_at || row.payment_date,
   };
 }
 
 export function normalizeSupplierPayment(row) {
-  const supplier = row.suppliers?.name || row.suppliers?.code || "Fournisseur";
+  const supplier = supplierDisplayLabel(row.suppliers) || "Fournisseur";
   return {
     id: eventId("supplier_payments", row.id),
     domain: HISTORY_DOMAINS.business,
@@ -226,6 +281,7 @@ export function normalizeSupplierPayment(row) {
     fundId: null,
     supplierId: row.supplier_id || null,
     customerId: null,
+    productId: null,
     createdAt: row.created_at || row.payment_date,
   };
 }
@@ -248,6 +304,7 @@ export function normalizeBusinessExpense(row) {
     fundId: null,
     supplierId: null,
     customerId: null,
+    productId: null,
     createdAt: row.created_at || row.expense_date,
   };
 }
@@ -272,6 +329,7 @@ export function normalizeAdjustment(row) {
     fundId: null,
     supplierId: null,
     customerId: null,
+    productId: row.product_id || row.products?.id || null,
     createdAt: row.created_at || row.adjustment_date,
   };
 }
@@ -300,6 +358,7 @@ export function sortHistoryEvents(events = []) {
  *   fundId?: string,
  *   supplierId?: string,
  *   customerId?: string,
+ *   productId?: string,
  *   search?: string,
  * }} filters
  */
@@ -309,22 +368,36 @@ export function filterHistoryEvents(events = [], filters = {}) {
   const fundId = filters.fundId || "";
   const supplierId = filters.supplierId || "";
   const customerId = filters.customerId || "";
-  const search = String(filters.search || "")
-    .trim()
-    .toLowerCase();
+  const productId = filters.productId || "";
+  const search = normalizePersonName(filters.search);
+  const allowedTypes = domain ? new Set(historyTypesForDomain(domain)) : null;
 
   return events.filter((event) => {
     if (!isDateInRange(event.date, filters.from || null, filters.to || null)) {
       return false;
     }
     if (domain && event.domain !== domain) return false;
+    if (allowedTypes && !allowedTypes.has(event.type)) return false;
     if (type && event.type !== type) return false;
     if (fundId && event.fundId !== fundId) return false;
     if (supplierId && event.supplierId !== supplierId) return false;
     if (customerId && event.customerId !== customerId) return false;
-    if (search && !event.searchText.includes(search)) return false;
+    if (productId && event.productId !== productId) return false;
+    if (search && !normalizePersonName(event.searchText).includes(search)) return false;
     return true;
   });
+}
+
+export function countActiveHistoryFilters(filters = {}, { defaultPeriod = "month", includeSearch = true } = {}) {
+  let count = 0;
+  if (filters.type) count += 1;
+  if (filters.fundId) count += 1;
+  if (filters.supplierId) count += 1;
+  if (filters.customerId) count += 1;
+  if (filters.productId) count += 1;
+  if (includeSearch && String(filters.search || "").trim()) count += 1;
+  if (filters.period && filters.period !== defaultPeriod) count += 1;
+  return count;
 }
 
 export function paginateHistoryEvents(events = [], offset = 0, limit = 25) {

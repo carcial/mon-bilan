@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  allocatePaymentFifo,
   applyCustomerPayment,
   calculateArrivalExpenses,
   calculateAvailableInventory,
@@ -16,11 +17,16 @@ import {
   calculateSupplierOutstanding,
   calculateUnitMargin,
   canSellQuantity,
+  computeSaleRemainders,
   inferPaymentMethod,
+  inferSettlementStatus,
   isSaleAtLoss,
+  paidNowForSettlement,
   validateArrival,
+  validateMoneyPayment,
   validateSale,
 } from "../src/utils/business-calc.js";
+import { customerComboboxState, findCustomerByName, resolveSaleCustomer } from "../src/utils/choice-ui.js";
 import { matchBusinessRoute } from "../src/modules/business/business-routes.js";
 
 describe("arrival costing", () => {
@@ -85,7 +91,7 @@ describe("sales and payments", () => {
       paid: 50000,
       remaining: 105000,
     });
-    expect(inferPaymentMethod(155000, 155000)).toBe("cash");
+    expect(inferPaymentMethod(155000, 155000)).toBe("paid");
     expect(inferPaymentMethod(155000, 0)).toBe("credit");
     expect(inferPaymentMethod(155000, 50000)).toBe("partial");
   });
@@ -98,7 +104,7 @@ describe("sales and payments", () => {
     });
   });
 
-  it("detects a sale below cost", () => {
+  it("detects a sale below the supplier amount", () => {
     expect(calculateUnitMargin(24000, 26500)).toBe(-2500);
     expect(isSaleAtLoss(24000, 26500)).toBe(true);
     expect(calculateLineMargin(5, 24000, 26500)).toBe(-12500);
@@ -125,7 +131,7 @@ describe("expenses and profit", () => {
   it("builds a period summary", () => {
     const totals = calculatePeriodBusinessTotals({
       saleItems: [
-        { quantity: 14, sale_unit_price_fcfa: 30000, effective_unit_cost_fcfa: 26500 },
+        { quantity: 14, sale_unit_price_fcfa: 30000, supplier_unit_price_fcfa: 25000, effective_unit_cost_fcfa: 26500 },
       ],
       sales: [{ amount_paid_fcfa: 310000 }],
       customerPayments: [],
@@ -134,10 +140,11 @@ describe("expenses and profit", () => {
     expect(totals.revenue).toBe(420000);
     expect(totals.cashCollected).toBe(310000);
     expect(totals.creditIssued).toBe(110000);
-    expect(totals.cogs).toBe(371000);
+    expect(totals.cogs).toBe(350000);
     expect(totals.operatingExpenses).toBe(42000);
     expect(totals.unitsSold).toBe(14);
-    expect(totals.estimatedProfit).toBe(420000 - 371000 - 42000);
+    expect(totals.estimatedProfit).toBe(420000 - 350000 - 42000);
+    expect(totals.grossMargin).toBe(70000);
   });
 });
 
@@ -170,6 +177,122 @@ describe("validation", () => {
   });
 });
 
+describe("settlement vs payment method", () => {
+  it("separates paid / partial / credit from cash instruments", () => {
+    expect(inferSettlementStatus(100000, 100000)).toBe("paid");
+    expect(inferSettlementStatus(100000, 30000)).toBe("partial");
+    expect(inferSettlementStatus(100000, 0)).toBe("credit");
+    expect(paidNowForSettlement("paid", 100000, 0)).toBe(100000);
+    expect(paidNowForSettlement("credit", 100000, 50)).toBe(0);
+    expect(paidNowForSettlement("partial", 100000, 30000)).toBe(30000);
+  });
+
+  it("requires a payment method only when money is received now", () => {
+    const paid = validateSale({
+      customerId: "c",
+      productId: "p",
+      arrivalId: "a",
+      quantity: 1,
+      unitPrice: 100000,
+      date: "2026-09-03",
+      available: 5,
+      settlementStatus: "paid",
+      paymentMethod: "mobile_money",
+    });
+    expect(paid.ok).toBe(true);
+    expect(paid.amountPaid).toBe(100000);
+    expect(paid.method).toBe("mobile_money");
+
+    const credit = validateSale({
+      customerId: "c",
+      productId: "p",
+      arrivalId: "a",
+      quantity: 1,
+      unitPrice: 100000,
+      date: "2026-09-03",
+      available: 5,
+      settlementStatus: "credit",
+      repaymentExpectation: "undetermined",
+    });
+    expect(credit.ok).toBe(true);
+    expect(credit.amountPaid).toBe(0);
+    expect(credit.method).toBeNull();
+
+    const partial = validateSale({
+      customerId: "c",
+      productId: "p",
+      arrivalId: "a",
+      quantity: 1,
+      unitPrice: 100000,
+      date: "2026-09-03",
+      available: 5,
+      settlementStatus: "partial",
+      amountPaid: 30000,
+      paymentMethod: "bank",
+      repaymentExpectation: "exact",
+      repaymentExactDate: "2026-09-15",
+    });
+    expect(partial.ok).toBe(true);
+    expect(partial.amountPaid).toBe(30000);
+
+    const missingDate = validateSale({
+      customerId: "c",
+      productId: "p",
+      arrivalId: "a",
+      quantity: 1,
+      unitPrice: 100000,
+      date: "2026-09-03",
+      available: 5,
+      settlementStatus: "credit",
+      repaymentExpectation: "exact",
+    });
+    expect(missingDate.ok).toBe(false);
+    expect(missingDate.errors.repaymentExactDate).toBeTruthy();
+
+    const approx = validateSale({
+      customerId: "c",
+      productId: "p",
+      arrivalId: "a",
+      quantity: 1,
+      unitPrice: 100000,
+      date: "2026-09-03",
+      available: 5,
+      settlementStatus: "partial",
+      amountPaid: 20000,
+      paymentMethod: "cash",
+      repaymentExpectation: "approximate",
+      repaymentApproxText: "Début octobre",
+    });
+    expect(approx.ok).toBe(true);
+  });
+
+  it("blocks overpayment and reaches zero remaining", () => {
+    expect(validateMoneyPayment({ amount: 80000, date: "2026-09-03", paymentMethod: "cash", outstanding: 65000 }).ok).toBe(false);
+    expect(validateMoneyPayment({ amount: 80000, date: "2026-09-03", paymentMethod: "cash", outstanding: 65000 }).errors.amount).toMatch(/dépasse/);
+    expect(applyCustomerPayment(50000, 50000)).toEqual({ applied: 50000, remaining: 0, excess: 0 });
+  });
+
+  it("allocates later payments FIFO to the oldest sale", () => {
+    const remainders = computeSaleRemainders(
+      [
+        { id: "s2", sale_date: "2026-09-10", amount_paid_fcfa: 0, sale_items: [{ quantity: 1, sale_unit_price_fcfa: 40000 }] },
+        { id: "s1", sale_date: "2026-09-01", amount_paid_fcfa: 0, sale_items: [{ quantity: 1, sale_unit_price_fcfa: 70000 }] },
+      ],
+      [],
+    );
+    expect(remainders[0].saleId).toBe("s1");
+    const { allocations } = allocatePaymentFifo(remainders, 20000);
+    expect(allocations).toEqual([{ saleId: "s1", amount: 20000 }]);
+  });
+
+  it("reuses an existing customer instead of creating a duplicate", () => {
+    const customers = [{ id: "c1", name: "Maman Jeanne" }];
+    expect(findCustomerByName(customers, "  maman   jeanne ")).toEqual(customers[0]);
+    expect(customerComboboxState(customers, "Maman Jeanne").canCreate).toBe(false);
+    expect(resolveSaleCustomer({ newCustomerName: "Maman Jeanne" }, customers).customerId).toBe("c1");
+  });
+});
+
 describe("business routes", () => {
   it("parses commerce sub-routes", () => {
     expect(matchBusinessRoute("/commerce")).toEqual({ name: "dashboard" });
@@ -177,6 +300,7 @@ describe("business routes", () => {
     expect(matchBusinessRoute("/commerce/arrivee")).toEqual({ name: "arrival" });
     expect(matchBusinessRoute("/commerce/clients")).toEqual({ name: "customers" });
     expect(matchBusinessRoute("/commerce/a-recevoir")).toEqual({ name: "receivables" });
+    expect(matchBusinessRoute("/commerce/a-recevoir/paiement")).toEqual({ name: "customer-payment" });
     expect(matchBusinessRoute("/commerce/bordereau/xyz")).toEqual({
       name: "bordereau",
       id: "xyz",

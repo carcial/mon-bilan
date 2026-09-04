@@ -5,7 +5,7 @@ import {
   deleteChurchTransaction,
   getChurchTransaction,
 } from "../../services/supabase/church.js";
-import { formatDateTimeFr, formatLongDateFr } from "../../utils/dates.js";
+import { displayDateFr, formatDateTimeFr } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
 import {
   errorStateHtml,
@@ -80,7 +80,7 @@ function detailHtml(tx) {
         </div>
         <div>
           <dt>Date</dt>
-          <dd>${escapeHtml(formatLongDateFr(tx.transaction_date))}</dd>
+          <dd>${escapeHtml(displayDateFr(tx.transaction_date))}</dd>
         </div>
         <div>
           <dt>Motif</dt>
@@ -126,7 +126,7 @@ function bindDetail(body, tx, ctx) {
         rows: [
           { label: "Caisse", value: fundName(tx.church_funds) },
           { label: "Motif", value: tx.reason },
-          { label: "Date", value: formatLongDateFr(tx.transaction_date) },
+          { label: "Date", value: displayDateFr(tx.transaction_date) },
         ],
         confirmLabel: "Supprimer définitivement",
         cancelLabel: "Annuler",

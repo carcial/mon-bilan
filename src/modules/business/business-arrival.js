@@ -7,28 +7,29 @@ import {
   getSuppliers,
 } from "../../services/supabase/business.js";
 import {
-  calculateArrivalExpenses,
-  calculateEffectiveBatchCost,
-  calculateEffectiveUnitCost,
-  calculateMerchandiseValue,
   calculateSupplierOutstanding,
+  summarizeArrivalEngagement,
   validateArrival,
 } from "../../utils/business-calc.js";
-import { formatLongDateFr, todayIso } from "../../utils/dates.js";
+import { displayDateFr, todayIso } from "../../utils/dates.js";
+import { supplierDisplayLabel } from "../../utils/supplier-label.js";
+import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
 import { formatFcfa } from "../../utils/money.js";
 import { createSubmitGuard } from "../../utils/submit-guard.js";
 import { businessSuccessPath } from "./business-routes.js";
+import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field.js";
 import {
   bindIntegerInput,
   bindMoneyInput,
+  BUSINESS_LINKS,
   clearFieldErrors,
   errorStateHtml,
   moneyInputHtml,
   pageHeaderHtml,
-  selectHtml,
   setFieldError,
   skeletonHtml,
+  supplierAmountPerUnitLabel,
   unitLabel,
 } from "./business-ui.js";
 
@@ -41,6 +42,7 @@ export function renderArrivalForm(root, ctx = {}) {
         title: "Nouvel arrivage",
         subtitle: "Enregistrer un bordereau fournisseur.",
         backHref: ROUTES.business,
+        backLabel: "Retour au commerce",
       })}
       <div data-role="body">${skeletonHtml(5)}</div>
     </section>
@@ -65,36 +67,43 @@ async function loadForm(body, ctx) {
 
 function formHtml({ suppliers, products, draft: d }) {
   return `
-    <form class="church-form stack" data-role="form" novalidate>
-      <div class="field">
-        <label class="field-label" for="arr-supplier">Fournisseur</label>
-        <select id="arr-supplier" name="supplierId" class="field-input">
-          ${selectHtml(suppliers, d?.supplierId || suppliers[0]?.id, {
-            labelFn: (s) => `${s.code} — ${s.name}`,
-          })}
-        </select>
-        <p class="field-error" data-error="supplierId" hidden></p>
-      </div>
-      <div class="field">
-        <label class="field-label" for="arr-product">Produit</label>
-        <select id="arr-product" name="productId" class="field-input">
-          ${selectHtml(products, d?.productId || products[0]?.id, {
-            labelFn: (p) => `${p.name} (${p.unit_type})`,
-          })}
-        </select>
-        <p class="field-error" data-error="productId" hidden></p>
-      </div>
-      <div class="field">
-        <label class="field-label" for="arr-date">Date</label>
-        <input id="arr-date" name="date" type="date" class="field-input" value="${escapeHtml(d?.date || todayIso())}" />
-        <p class="field-error" data-error="date" hidden></p>
-      </div>
+    <form class="church-form sale-form stack" data-role="form" novalidate>
+      <section class="form-section">
+        <h2 class="form-section-title">Marchandise</h2>
+      ${choiceFieldHtml({
+        id: "arr-supplier",
+        name: "supplierId",
+        label: "Fournisseur",
+        options: suppliers,
+        selectedId: d?.supplierId || "",
+        placeholder: "Choisir un fournisseur",
+        labelFn: (s) => supplierDisplayLabel(s),
+        emptyTitle: "Aucun fournisseur disponible.",
+        emptyHref: BUSINESS_LINKS.supplierNew,
+        emptyLabel: "Ajouter",
+      })}
+      ${choiceFieldHtml({
+        id: "arr-product",
+        name: "productId",
+        label: "Produit",
+        options: products,
+        selectedId: d?.productId || "",
+        placeholder: "Choisir un produit",
+        labelFn: (p) => p.name,
+        emptyTitle: "Aucun produit disponible.",
+        emptyHref: BUSINESS_LINKS.productNew,
+        emptyLabel: "Ajouter",
+      })}
+      ${dateFieldHtml({ id: "arr-date", name: "date", label: "Date", value: d?.date || todayIso() })}
       <div class="field">
         <label class="field-label" for="arr-qty">Quantité reçue</label>
         <input id="arr-qty" name="quantity" class="field-input" inputmode="numeric" value="${escapeHtml(d?.quantity || "")}" data-int="true" />
         <p class="field-error" data-error="quantity" hidden></p>
       </div>
-      ${moneyInputHtml("arr-price", "unitPrice", "Prix unitaire fournisseur")}
+      ${moneyInputHtml("arr-price", "unitPrice", supplierAmountPerUnitLabel("sac"), "Ce que le fournisseur attend pour chaque sac.")}
+      </section>
+      <section class="form-section">
+        <h2 class="form-section-title">Frais et note</h2>
       ${moneyInputHtml("arr-transport", "transport", "Transport")}
       ${moneyInputHtml("arr-unload", "unloading", "Déchargement")}
       ${moneyInputHtml("arr-other", "other", "Autres frais")}
@@ -105,8 +114,9 @@ function formHtml({ suppliers, products, draft: d }) {
       </label>
       <div class="field">
         <label class="field-label" for="arr-note">Note <span class="field-optional">(facultatif)</span></label>
-        <textarea id="arr-note" name="note" class="field-input field-textarea" rows="3">${escapeHtml(d?.note || "")}</textarea>
+        <textarea id="arr-note" name="note" class="field-input field-textarea" rows="2" placeholder="Ex. Camion du matin">${escapeHtml(d?.note || "")}</textarea>
       </div>
+      </section>
       <div class="card recon-preview" data-role="preview"></div>
       <p class="form-alert" data-role="form-error" hidden></p>
       <button type="submit" class="btn btn-primary btn-block">Continuer</button>
@@ -139,6 +149,8 @@ function bindForm(body, ctx) {
   const form = body.querySelector('[data-role="form"]');
   if (!form) return;
   form.querySelectorAll("[data-money]").forEach((el) => bindMoneyInput(el));
+  bindChoiceFields(form);
+  bindDateFields(form);
   form.querySelectorAll("[data-int]").forEach((el) => bindIntegerInput(el));
   const guard = createSubmitGuard();
   const preview = form.querySelector('[data-role="preview"]');
@@ -160,24 +172,21 @@ function bindForm(body, ctx) {
 
 function previewHtml(values, ctx) {
   const qty = Number(values.quantity) || 0;
-  if (qty <= 0) return `<p class="field-hint">Le résumé apparaîtra après la quantité et le prix.</p>`;
-  const merch = calculateMerchandiseValue(values.quantity, values.unitPrice);
-  const expenses = calculateArrivalExpenses(values);
-  const batch = calculateEffectiveBatchCost(values);
-  const unit = calculateEffectiveUnitCost(batch, qty);
+  if (qty <= 0) return `<p class="field-hint">Le résumé apparaîtra après la quantité et le montant fournisseur.</p>`;
+  const summary = summarizeArrivalEngagement(values);
   const outstanding = calculateSupplierOutstanding({
-    merchandiseValue: merch,
-    arrivalExpenses: expenses,
+    merchandiseValue: summary.merchandise,
+    arrivalExpenses: summary.fees,
     expensesOwedToSupplier: values.expensesOwed,
     advancePaid: values.advance,
   });
   const product = ctx.products.find((p) => p.id === values.productId);
   return `
-    <p><strong>${escapeHtml(String(qty))} ${escapeHtml(unitLabel(product?.unit_type, qty))}</strong></p>
-    <p>Marchandise : ${escapeHtml(formatFcfa(merch))}</p>
-    <p>Frais : ${escapeHtml(formatFcfa(expenses))}</p>
-    <p>Coût effectif : ${escapeHtml(formatFcfa(batch))}</p>
-    <p>Coût / unité : ${escapeHtml(unit == null ? "—" : formatFcfa(unit))}</p>
+    <p class="field-hint">${escapeHtml(String(qty))} ${escapeHtml(unitLabel(product?.unit_type, qty))} · ${escapeHtml(formatFcfa(summary.supplierAmountPerUnit))} / ${escapeHtml(unitLabel(product?.unit_type))}</p>
+    <p>Montant fournisseur : ${escapeHtml(formatFcfa(summary.merchandise))}</p>
+    <p>Frais : ${escapeHtml(formatFcfa(summary.fees))}</p>
+    ${summary.feeLabel ? `<p class="field-hint">${escapeHtml(summary.feeLabel.charAt(0).toUpperCase() + summary.feeLabel.slice(1))}</p>` : ""}
+    <p>Total engagé : ${escapeHtml(formatFcfa(summary.totalEngaged))}</p>
     <p>Reste fournisseur : ${escapeHtml(formatFcfa(outstanding))}</p>
   `;
 }
@@ -192,38 +201,32 @@ async function handleSubmit(form, ctx) {
   }
   const supplier = ctx.suppliers.find((s) => s.id === values.supplierId);
   const product = ctx.products.find((p) => p.id === values.productId);
-  const merch = calculateMerchandiseValue(validated.quantity, validated.unitPrice);
-  const expenses = calculateArrivalExpenses(validated);
-  const batch = calculateEffectiveBatchCost({
-    quantity: validated.quantity,
-    unitPrice: validated.unitPrice,
-    ...validated,
-  });
-  const unit = calculateEffectiveUnitCost(batch, validated.quantity);
+  const summary = summarizeArrivalEngagement(validated);
   const outstanding = calculateSupplierOutstanding({
-    merchandiseValue: merch,
-    arrivalExpenses: expenses,
+    merchandiseValue: summary.merchandise,
+    arrivalExpenses: summary.fees,
     expensesOwedToSupplier: values.expensesOwed,
     advancePaid: validated.advance,
   });
+  const feeNote = summary.feeLabel
+    ? summary.feeLabel.charAt(0).toUpperCase() + summary.feeLabel.slice(1)
+    : "";
 
   const result = await confirmAndWrite(
     {
       title: "CONFIRMER L'ARRIVAGE",
-      amountHtml: amountHtml(batch),
+      amountHtml: amountHtml(summary.totalEngaged),
       rows: [
         { label: "Fournisseur", value: supplier ? `${supplier.code}` : "—" },
         { label: "Produit", value: product?.name || "—" },
         { label: "Quantité", value: `${validated.quantity} ${unitLabel(product?.unit_type, validated.quantity)}` },
-        { label: "Marchandise", value: formatFcfa(merch) },
-        { label: "Transport", value: formatFcfa(validated.transport) },
-        { label: "Déchargement", value: formatFcfa(validated.unloading) },
-        { label: "Autres", value: formatFcfa(validated.other) },
-        { label: "Coût effectif", value: formatFcfa(batch) },
-        { label: "Coût / unité", value: unit == null ? "—" : formatFcfa(unit) },
+        { label: supplierAmountPerUnitLabel(product?.unit_type), value: formatFcfa(summary.supplierAmountPerUnit) },
+        { label: "Montant fournisseur", value: formatFcfa(summary.merchandise) },
+        { label: "Frais", value: feeNote ? `${formatFcfa(summary.fees)} — ${feeNote}` : formatFcfa(summary.fees) },
+        { label: "Total engagé", value: formatFcfa(summary.totalEngaged) },
         { label: "Avance fournisseur", value: formatFcfa(validated.advance) },
         { label: "Reste fournisseur", value: formatFcfa(outstanding) },
-        { label: "Date", value: formatLongDateFr(values.date) },
+        { label: "Date", value: displayDateFr(values.date) },
       ],
     },
     async () =>

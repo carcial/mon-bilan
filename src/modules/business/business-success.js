@@ -56,7 +56,7 @@ async function load(body, ctx) {
 function successHtml({ title, amount, home, detail, detailLabel }) {
   return `
     <div class="success-panel">
-      <p class="success-title"><span aria-hidden="true">✓</span> ${title}</p>
+      <p class="success-title">${title}</p>
       <div>${amountHtml(amount)}</div>
     </div>
     <div class="stack">

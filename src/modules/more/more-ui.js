@@ -1,24 +1,16 @@
 import { escapeHtml } from "../../utils/errors.js";
 import { ROUTES } from "../../router.js";
 import { MORE_PATHS } from "./more-routes.js";
+import { pageHeaderHtml as sharedPageHeaderHtml, backLinkHtml } from "../../components/page-header.js";
 
-export function backLinkHtml(href, label = "Retour") {
-  return `
-    <a class="back-link" href="#${href}">
-      <span aria-hidden="true">←</span> ${escapeHtml(label)}
-    </a>
-  `;
-}
+export { backLinkHtml };
 
-export function pageHeaderHtml({ kicker, title, subtitle, backHref, backLabel, titleId = "more-title" }) {
-  return `
-    <header class="page-header">
-      ${backHref ? backLinkHtml(backHref, backLabel || "Retour à Plus") : ""}
-      ${kicker ? `<p class="page-kicker">${escapeHtml(kicker)}</p>` : ""}
-      <h1 class="page-title" id="${titleId}">${escapeHtml(title)}</h1>
-      ${subtitle ? `<p class="page-subtitle">${escapeHtml(subtitle)}</p>` : ""}
-    </header>
-  `;
+export function pageHeaderHtml(props = {}) {
+  return sharedPageHeaderHtml({
+    backLabel: "Retour à Plus",
+    titleId: "more-title",
+    ...props,
+  });
 }
 
 export function skeletonHtml(lines = 3) {

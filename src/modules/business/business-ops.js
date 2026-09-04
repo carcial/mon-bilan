@@ -1,5 +1,9 @@
 import { amountHtml } from "../../components/amount.js";
+import { renderGroupedBarChart } from "../../components/charts.js";
+import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field.js";
+import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { confirmAndWrite } from "../../components/confirm-modal.js";
+import { iconHtml } from "../../components/icons.js";
 import { navigate, ROUTES } from "../../router.js";
 import {
   createExpense,
@@ -9,14 +13,20 @@ import {
   getBusinessHistory,
   getBusinessReport,
   getCustomerBalances,
+  getCustomerPayments,
   getExpenses,
   getSale,
   getSupplierBalances,
   saleTotal,
 } from "../../services/supabase/business.js";
-import { validateExpense } from "../../utils/business-calc.js";
 import {
-  formatLongDateFr,
+  calculateLineMargin,
+  calculateOperatingExpenses,
+  validateExpense,
+} from "../../utils/business-calc.js";
+import { supplierDisplayLabel } from "../../utils/supplier-label.js";
+import {
+  displayDateFr,
   formatNumericDateFr,
   todayIso,
 } from "../../utils/dates.js";
@@ -34,10 +44,11 @@ import {
   kindBadgeHtml,
   moneyInputHtml,
   pageHeaderHtml,
-  PAYMENT_LABELS,
-  selectHtml,
+  METHOD_LABELS,
+  SETTLEMENT_LABELS,
   setFieldError,
   skeletonHtml,
+  supplierAmountPerUnitLabel,
 } from "./business-ui.js";
 import {
   businessBordereauPath,
@@ -47,18 +58,88 @@ import {
 } from "./business-routes.js";
 
 export function renderReceivables(root) {
-  ledgerPage(root, {
-    title: "À recevoir",
-    load: getCustomerBalances,
-    empty: "Aucun client ne doit d'argent.",
-    totalLabel: "Total à recevoir",
-    href: (row) => businessCustomerPath(row.customer.id),
-    name: (row) => row.customer.name,
-    extra: (row) =>
-      row.oldestUnpaid
-        ? `Plus ancienne échéance : ${formatNumericDateFr(row.oldestUnpaid)}`
-        : "",
-  });
+  root.innerHTML = `
+    <section class="page business-page" aria-labelledby="business-title">
+      ${pageHeaderHtml({ title: "Paiements", subtitle: "Ce que les clients doivent encore.", backHref: ROUTES.business, backLabel: "Retour au commerce" })}
+      <div data-role="body" class="page-body pay-page">${skeletonHtml(4)}</div>
+    </section>
+  `;
+  const body = root.querySelector('[data-role="body"]');
+  Promise.all([getCustomerBalances(), getCustomerPayments()])
+    .then(([balances, payments]) => {
+      const owing = balances.filter((row) => row.outstanding > 0);
+      const total = owing.reduce((sum, row) => sum + row.outstanding, 0);
+      const today = todayIso();
+      const todayPayments = payments.filter((p) => p.payment_date === today);
+      const todayTotal = todayPayments.reduce((sum, row) => sum + (row.amount_fcfa || 0), 0);
+      const recent = payments.slice(0, 8);
+      body.innerHTML = `
+        <div class="pay-summary-grid">
+          <article class="card card-accent-business">
+            <p class="home-metric-label">À recevoir</p>
+            <div>${amountHtml(total, { className: "amount-sm" })}</div>
+          </article>
+          <article class="card">
+            <p class="home-metric-label">Paiements reçus aujourd'hui</p>
+            <div>${amountHtml(todayTotal, { className: "amount-sm" })}</div>
+            <p class="field-hint">${todayPayments.length} paiement${todayPayments.length > 1 ? "s" : ""}</p>
+          </article>
+        </div>
+        <a class="btn btn-primary btn-block pay-primary-action" href="#${BUSINESS_LINKS.paymentNew}">+ Enregistrer un paiement</a>
+        <section class="section-block">
+          <h2 class="section-title">Clients qui doivent encore</h2>
+        ${
+          owing.length
+            ? `<div class="list-card">${owing
+                .map((row) => {
+                  const due = row.dueSale;
+                  const dueText = due?.repayment_expectation === "exact" && due.repayment_exact_date
+                    ? formatNumericDateFr(due.repayment_exact_date)
+                    : due?.repayment_expectation === "approximate"
+                      ? due.repayment_approx_text
+                      : "Indéterminée";
+                  const last = row.lastPayment
+                    ? `${formatFcfa(row.lastPayment.amount_fcfa)}`
+                    : "Aucun";
+                  return `
+                    <a class="list-row" href="#${businessCustomerPath(row.customer.id)}">
+                      <span class="list-row-body">
+                        <span class="list-row-title">${escapeHtml(row.customer.name)}</span>
+                        <span class="list-row-meta">Doit encore ${escapeHtml(formatFcfa(row.outstanding))}</span>
+                        <span class="list-row-meta">Dernier paiement : ${escapeHtml(last)}</span>
+                        <span class="list-row-meta">Échéance : ${escapeHtml(dueText)}</span>
+                      </span>
+                    </a>`;
+                })
+                .join("")}</div>`
+            : emptyStateHtml({ title: "Personne ne doit d'argent." })
+        }
+        </section>
+        <section class="section-block">
+          <h2 class="section-title">Paiements récents</h2>
+          ${paymentListHtml(recent, "Aucun paiement récent.")}
+        </section>
+      `;
+    })
+    .catch((err) => {
+      body.innerHTML = errorStateHtml(friendlyError(err));
+    });
+}
+
+function paymentListHtml(rows, empty) {
+  if (!rows.length) return `<p class="field-hint">${escapeHtml(empty)}</p>`;
+  return `<div class="list-card">${rows
+    .map(
+      (pay) => `
+    <article class="list-row">
+      <span class="list-row-body">
+        <span class="list-row-title">${escapeHtml(formatFcfa(pay.amount_fcfa))}</span>
+        <span class="list-row-meta">${escapeHtml(formatNumericDateFr(pay.payment_date))} · ${escapeHtml(pay.customers?.name || "Client")} · ${escapeHtml(METHOD_LABELS[pay.payment_method] || pay.payment_method || "")}</span>
+      </span>
+    </article>
+  `,
+    )
+    .join("")}</div>`;
 }
 
 export function renderPayables(root) {
@@ -68,7 +149,7 @@ export function renderPayables(root) {
     empty: "Rien à payer aux fournisseurs.",
     totalLabel: "Total à payer",
     href: (row) => businessSupplierPath(row.supplier.id),
-    name: (row) => `${row.supplier.code} — ${row.supplier.name}`,
+    name: (row) => supplierDisplayLabel(row.supplier),
     extra: () => "",
   });
 }
@@ -104,14 +185,17 @@ function ledgerPage(root, { title, load, empty, totalLabel, href, name, extra })
           <p class="home-metric-label">${escapeHtml(totalLabel)}</p>
           <div>${amountHtml(total)}</div>
         </article>
-        <div class="tx-list">
+        <div class="list-card">
           ${rows
             .map(
               (row) => `
-            <a class="card tx-card" href="#${href(row)}" style="text-decoration:none">
-              <p class="tx-fund">${escapeHtml(name(row))}</p>
-              <div>${amountHtml(row.outstanding, { className: "amount-sm" })}</div>
-              ${extra(row) ? `<p class="field-hint">${escapeHtml(extra(row))}</p>` : ""}
+            <a class="list-row" href="#${href(row)}">
+              <span class="list-row-icon">${iconHtml("user", { weight: "bold" })}</span>
+              <span class="list-row-body">
+                <span class="list-row-title">${escapeHtml(name(row))}</span>
+                ${extra(row) ? `<span class="list-row-meta">${escapeHtml(extra(row))}</span>` : ""}
+              </span>
+              <span class="list-row-amount">${amountHtml(row.outstanding, { className: "amount-sm" })}</span>
             </a>
           `,
             )
@@ -135,9 +219,13 @@ function ledgerPage(root, { title, load, empty, totalLabel, href, name, extra })
 export function renderExpenses(root, ctx = {}) {
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      ${pageHeaderHtml({ title: "Dépenses", backHref: ROUTES.business })}
-      <a class="btn btn-secondary btn-block" href="#${BUSINESS_LINKS.expenseNew}" style="margin-bottom:1rem">+ Nouvelle dépense</a>
-      <div data-role="body">${skeletonHtml(3)}</div>
+      ${pageHeaderHtml({
+        title: "Dépenses",
+        subtitle: "Tous les frais enregistrés pour le commerce.",
+        backHref: ROUTES.business,
+        backLabel: "Retour au commerce",
+      })}
+      <div data-role="body" class="page-body pay-page">${skeletonHtml(4)}</div>
     </section>
   `;
   loadExpenses(root.querySelector('[data-role="body"]'), ctx);
@@ -146,28 +234,29 @@ export function renderExpenses(root, ctx = {}) {
 async function loadExpenses(body, ctx) {
   try {
     const rows = await getExpenses();
-    const visible = rows.filter((r) => !r.is_arrival_cost_allocation);
-    if (!visible.length) {
-      body.innerHTML = emptyStateHtml({
-        title: "Aucune dépense enregistrée.",
-        actionHref: BUSINESS_LINKS.expenseNew,
-        actionLabel: "Nouvelle dépense",
-      });
-      return;
-    }
-    body.innerHTML = `<div class="tx-list">${visible
-      .map(
-        (row) => `
-      <article class="card">
-        <p class="tx-date">${escapeHtml(formatNumericDateFr(row.expense_date))}</p>
-        <p class="tx-fund">${escapeHtml(EXPENSE_LABELS[row.category] || row.category)}</p>
-        <div>${amountHtml(row.amount_fcfa, { className: "amount-sm" })}</div>
-        <p>${escapeHtml(row.description)}</p>
-        <button type="button" class="btn btn-ghost" data-del="${escapeHtml(row.id)}">Supprimer</button>
-      </article>
-    `,
-      )
-      .join("")}</div>`;
+    const today = todayIso();
+    const todayRows = rows.filter((row) => row.expense_date === today);
+    const opexTotal = calculateOperatingExpenses(rows);
+    const todayTotal = calculateOperatingExpenses(todayRows);
+    body.innerHTML = `
+      <div class="pay-summary-grid">
+        <article class="card card-accent-business">
+          <p class="home-metric-label">Dépenses d'exploitation</p>
+          <div>${amountHtml(opexTotal, { className: "amount-sm" })}</div>
+          <p class="field-hint">${rows.length} enregistrement${rows.length > 1 ? "s" : ""}</p>
+        </article>
+        <article class="card">
+          <p class="home-metric-label">Aujourd'hui</p>
+          <div>${amountHtml(todayTotal, { className: "amount-sm" })}</div>
+          <p class="field-hint">${todayRows.length} dépense${todayRows.length > 1 ? "s" : ""}</p>
+        </article>
+      </div>
+      <a class="btn btn-primary btn-block pay-primary-action" href="#${BUSINESS_LINKS.expenseNew}">+ Nouvelle dépense</a>
+      <section class="section-block">
+        <h2 class="section-title">Toutes les dépenses</h2>
+        ${expenseListHtml(rows)}
+      </section>
+    `;
     body.querySelectorAll("[data-del]").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const result = await confirmAndWrite(
@@ -190,10 +279,38 @@ async function loadExpenses(body, ctx) {
   }
 }
 
+function expenseListHtml(rows) {
+  if (!rows.length) {
+    return emptyStateHtml({
+      title: "Aucune dépense enregistrée.",
+      actionHref: BUSINESS_LINKS.expenseNew,
+      actionLabel: "Nouvelle dépense",
+    });
+  }
+  return `<div class="list-card">${rows
+    .map((row) => {
+      const allocated = Boolean(row.is_arrival_cost_allocation);
+      return `
+      <article class="list-row">
+        <span class="list-row-body">
+          <span class="list-row-title">${escapeHtml(row.description || EXPENSE_LABELS[row.category] || row.category)}</span>
+          <span class="list-row-meta">${escapeHtml(EXPENSE_LABELS[row.category] || row.category)} · ${escapeHtml(formatNumericDateFr(row.expense_date))}${
+            allocated ? " · Déjà dans l'arrivage" : ""
+          }</span>
+        </span>
+        <span class="list-row-side">
+          <span class="list-row-amount">${amountHtml(row.amount_fcfa, { className: "amount-sm" })}</span>
+          <button type="button" class="btn btn-ghost" data-del="${escapeHtml(row.id)}">Supprimer</button>
+        </span>
+      </article>`;
+    })
+    .join("")}</div>`;
+}
+
 export function renderExpenseForm(root, ctx = {}) {
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      ${pageHeaderHtml({ title: "Nouvelle dépense", backHref: BUSINESS_LINKS.expenses })}
+      ${pageHeaderHtml({ title: "Nouvelle dépense", backHref: BUSINESS_LINKS.expenses, backLabel: "Retour aux dépenses" })}
       <div data-role="body">${skeletonHtml(3)}</div>
     </section>
   `;
@@ -205,47 +322,51 @@ async function loadExpenseForm(body, ctx) {
     const arrivals = await getArrivals();
     body.innerHTML = `
       <form class="church-form stack" data-role="form">
-        <div class="field">
-          <label class="field-label" for="ex-cat">Catégorie</label>
-          <select id="ex-cat" name="category" class="field-input">
-            ${Object.entries(EXPENSE_LABELS)
-              .map(([k, v]) => `<option value="${k}">${escapeHtml(v)}</option>`)
-              .join("")}
-          </select>
-          <p class="field-error" data-error="category" hidden></p>
-        </div>
+        ${choiceFieldHtml({
+          id: "ex-cat",
+          name: "category",
+          label: "Catégorie",
+          options: Object.entries(EXPENSE_LABELS).map(([id, name]) => ({ id, name })),
+          selectedId: Object.keys(EXPENSE_LABELS)[0] || "",
+          placeholder: "Choisir une catégorie",
+        })}
         ${moneyInputHtml("ex-amount", "amount", "Montant")}
-        <div class="field">
-          <label class="field-label" for="ex-date">Date</label>
-          <input id="ex-date" name="date" type="date" class="field-input" value="${todayIso()}" />
-          <p class="field-error" data-error="date" hidden></p>
-        </div>
-        <div class="field">
-          <label class="field-label" for="ex-arr">Arrivage lié <span class="field-optional">(facultatif)</span></label>
-          <select id="ex-arr" name="arrivalId" class="field-input">
-            <option value="">Aucun</option>
-            ${selectHtml(arrivals, "", {
-              labelFn: (a) => `${a.suppliers?.code || ""} · ${a.products?.name || ""} · ${a.arrival_date}`,
-            })}
-          </select>
-        </div>
+        ${dateFieldHtml({ id: "ex-date", name: "date", label: "Date", value: todayIso() })}
+        ${
+          arrivals.length
+            ? choiceFieldHtml({
+                id: "ex-arr",
+                name: "arrivalId",
+                label: "Arrivage lié",
+                options: [{ id: "", name: "Aucun" }, ...arrivals],
+                selectedId: "",
+                placeholder: "Aucun",
+                labelFn: (a) =>
+                  a.id
+                    ? `${supplierDisplayLabel(a.suppliers)} · ${a.products?.name || ""} · ${formatNumericDateFr(a.arrival_date)}`
+                    : "Aucun",
+              })
+            : `<input type="hidden" name="arrivalId" value="" />`
+        }
         <label class="field-check">
           <input type="checkbox" name="allocation" />
           Déjà inclus dans le coût de l'arrivage (ne pas compter deux fois)
         </label>
         <div class="field">
           <label class="field-label" for="ex-desc">Motif</label>
-          <input id="ex-desc" name="description" class="field-input" />
+          <input id="ex-desc" name="description" class="field-input" placeholder="Ex. Frais de marché" />
           <p class="field-error" data-error="description" hidden></p>
         </div>
         <div class="field">
           <label class="field-label" for="ex-note">Note <span class="field-optional">(facultatif)</span></label>
-          <textarea id="ex-note" name="note" class="field-input field-textarea" rows="3"></textarea>
+          <textarea id="ex-note" name="note" class="field-input field-textarea" rows="2" placeholder="Ex. Paiement prévu vendredi"></textarea>
         </div>
         <button class="btn btn-primary btn-block" type="submit">Continuer</button>
       </form>
     `;
     const form = body.querySelector("form");
+    bindChoiceFields(form);
+    bindDateFields(form);
     form.querySelectorAll("[data-money]").forEach((el) => bindMoneyInput(el));
     const guard = createSubmitGuard();
     form.addEventListener("submit", async (event) => {
@@ -278,7 +399,7 @@ async function loadExpenseForm(body, ctx) {
             rows: [
               { label: "Catégorie", value: EXPENSE_LABELS[values.category] },
               { label: "Motif", value: values.description },
-              { label: "Date", value: formatLongDateFr(values.date) },
+              { label: "Date", value: displayDateFr(values.date) },
             ],
           },
           () =>
@@ -301,7 +422,7 @@ async function loadExpenseForm(body, ctx) {
 export function renderSaleDetail(root, ctx) {
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      ${pageHeaderHtml({ title: "Vente", backHref: BUSINESS_LINKS.history, backLabel: "Retour à l'historique" })}
+      ${pageHeaderHtml({ title: "Vente", backHref: ROUTES.business, backLabel: "Retour au commerce" })}
       <div data-role="body">${skeletonHtml(4)}</div>
     </section>
   `;
@@ -317,18 +438,28 @@ async function loadSale(body, ctx) {
     }
     const item = sale.sale_items?.[0];
     const total = saleTotal(sale);
+    const unitType = item?.products?.unit_type;
+    const supplierAmount = item?.stock_arrivals?.supplier_unit_price_fcfa;
+    const salePrice = item?.sale_unit_price_fcfa;
+    const margin =
+      supplierAmount == null || salePrice == null || item?.quantity == null
+        ? null
+        : calculateLineMargin(item.quantity, salePrice, supplierAmount);
     body.innerHTML = `
       <article class="card">
-        <p class="tx-kind tx-kind-out">VENTE · ${escapeHtml(PAYMENT_LABELS[sale.payment_method] || "")}</p>
+        <p class="tx-kind tx-kind-out">VENTE · ${escapeHtml(SETTLEMENT_LABELS[sale.settlement_status] || "")}</p>
         <div>${amountHtml(total)}</div>
         <dl class="detail-list">
           <div><dt>Client</dt><dd><a href="#${businessCustomerPath(sale.customer_id)}">${escapeHtml(sale.customers?.name || "")}</a></dd></div>
           <div><dt>Produit</dt><dd>${escapeHtml(item?.products?.name || "")}</dd></div>
           <div><dt>Quantité</dt><dd>${item?.quantity ?? "—"}</dd></div>
-          <div><dt>Prix unitaire</dt><dd>${escapeHtml(formatFcfa(item?.sale_unit_price_fcfa || 0))}</dd></div>
-          <div><dt>Coût réel</dt><dd>${item?.effective_unit_cost_fcfa == null ? "—" : escapeHtml(formatFcfa(item.effective_unit_cost_fcfa))}</dd></div>
+          <div><dt>${escapeHtml(supplierAmountPerUnitLabel(unitType))}</dt><dd>${supplierAmount == null ? "—" : escapeHtml(formatFcfa(supplierAmount))}</dd></div>
+          <div><dt>Prix de vente</dt><dd>${escapeHtml(formatFcfa(salePrice || 0))}</dd></div>
+          <div><dt>Marge estimée</dt><dd>${margin == null ? "—" : escapeHtml(formatFcfa(margin))}</dd></div>
+          <div><dt>Statut</dt><dd>${escapeHtml(SETTLEMENT_LABELS[sale.settlement_status] || "—")}</dd></div>
+          <div><dt>Mode</dt><dd>${escapeHtml(METHOD_LABELS[sale.payment_method] || "—")}</dd></div>
           <div><dt>Payé à la vente</dt><dd>${escapeHtml(formatFcfa(sale.amount_paid_fcfa))}</dd></div>
-          <div><dt>Date</dt><dd>${escapeHtml(formatLongDateFr(sale.sale_date))}</dd></div>
+          <div><dt>Date</dt><dd>${escapeHtml(displayDateFr(sale.sale_date))}</dd></div>
           <div><dt>Remboursement</dt><dd>${escapeHtml(repayLabel(sale))}</dd></div>
         </dl>
       </article>
@@ -358,7 +489,7 @@ async function loadSale(body, ctx) {
 
 function repayLabel(sale) {
   if (sale.repayment_expectation === "exact" && sale.repayment_exact_date) {
-    return `Date exacte : ${formatLongDateFr(sale.repayment_exact_date)}`;
+    return `Date exacte : ${displayDateFr(sale.repayment_exact_date)}`;
   }
   if (sale.repayment_expectation === "approximate") {
     return sale.repayment_approx_text || "Approximatif";
@@ -375,8 +506,10 @@ export function renderBusinessHistory(root) {
         title: "Historique",
         subtitle: "Opérations du commerce uniquement.",
         backHref: ROUTES.business,
+        backLabel: "Retour au commerce",
       })}
-      <div class="filter-row" style="margin-bottom:1rem">
+      <div class="page-body">
+      <div class="filter-row" style="margin-bottom:0">
         ${[
           ["", "Toutes"],
           ["arrival", "Arrivages"],
@@ -393,6 +526,7 @@ export function renderBusinessHistory(root) {
           .join("")}
       </div>
       <div data-role="body">${skeletonHtml(3)}</div>
+      </div>
     </section>
   `;
   const body = root.querySelector('[data-role="body"]');
@@ -418,7 +552,7 @@ async function loadHistory(body) {
       });
       return;
     }
-    body.innerHTML = `<div class="tx-list">${rows.map(historyCard).join("")}</div>`;
+    body.innerHTML = `<div class="list-card">${rows.map(historyCard).join("")}</div>`;
   } catch (err) {
     body.innerHTML = errorStateHtml(friendlyError(err));
   }
@@ -445,11 +579,14 @@ function historyCard(entry) {
           : entry.kind === "adjustment"
             ? entry.row.reason
             : formatFcfa(entry.row.amount_fcfa || 0);
+  const isOut = entry.kind === "sale" || entry.kind === "supplier_payment" || entry.kind === "expense";
   return `
-    <a class="card tx-card" href="#${href}" style="text-decoration:none">
-      <div class="tx-card-top">${kindBadgeHtml(entry.kind)}</div>
-      <p class="tx-date">${escapeHtml(formatNumericDateFr(entry.date))}</p>
-      <p class="tx-reason">${escapeHtml(label)}</p>
+    <a class="list-row" href="#${href}">
+      <span class="list-row-icon ${isOut ? "is-out" : "is-in"}">${kindBadgeHtml(entry.kind)}</span>
+      <span class="list-row-body">
+        <span class="list-row-title">${escapeHtml(label)}</span>
+        <span class="list-row-meta">${escapeHtml(formatNumericDateFr(entry.date))}</span>
+      </span>
     </a>
   `;
 }
@@ -467,7 +604,7 @@ export function renderBusinessReport(root) {
         backHref: ROUTES.business,
       })}
       <div data-role="filters"></div>
-      <div data-role="body">${skeletonHtml(4)}</div>
+      <div class="report-stack" data-role="body">${skeletonHtml(4)}</div>
     </section>
   `;
   const filters = root.querySelector('[data-role="filters"]');
@@ -475,13 +612,14 @@ export function renderBusinessReport(root) {
   const paintFilters = () => {
     filters.innerHTML = `
       <div class="filter-panel stack-sm">
-        <div class="filter-row">
+        <p class="filter-legend">Période</p>
+        <div class="filter-row" role="group" aria-label="Période du rapport">
           ${[
             [PERIODS.today, "Aujourd'hui"],
-            [PERIODS.week, "Semaine"],
-            [PERIODS.month, "Mois"],
-            [PERIODS.year, "Année"],
-            [PERIODS.custom, "Période"],
+            [PERIODS.week, "Cette semaine"],
+            [PERIODS.month, "Ce mois"],
+            [PERIODS.year, "Cette année"],
+            [PERIODS.custom, "Personnalisée"],
           ]
             .map(
               ([value, label]) =>
@@ -490,11 +628,12 @@ export function renderBusinessReport(root) {
             .join("")}
         </div>
         <div class="custom-period${reportPeriod === PERIODS.custom ? "" : " is-hidden"}">
-          <div class="field"><label class="field-label" for="br-from">Du</label><input id="br-from" type="date" class="field-input" value="${escapeHtml(reportFrom)}" data-role="from" /></div>
-          <div class="field"><label class="field-label" for="br-to">Au</label><input id="br-to" type="date" class="field-input" value="${escapeHtml(reportTo)}" data-role="to" /></div>
+          ${dateFieldHtml({ id: "br-from", name: "from", label: "Date de début", value: reportFrom, dataRole: "from", defaultToday: false })}
+          ${dateFieldHtml({ id: "br-to", name: "to", label: "Date de fin", value: reportTo, dataRole: "to", defaultToday: false })}
         </div>
       </div>
     `;
+    bindDateFields(filters);
     filters.querySelectorAll("[data-period]").forEach((btn) => {
       btn.addEventListener("click", () => {
         reportPeriod = btn.getAttribute("data-period");
@@ -528,21 +667,40 @@ async function loadReport(body) {
       reportPeriod === PERIODS.month ? monthTitleFr() : periodLabelFr(reportPeriod, range);
     body.innerHTML = `
       <p class="report-period">${escapeHtml(title)}</p>
-      <article class="card card-accent-business">
-        <p class="home-metric-label">Recettes</p><div>${amountHtml(report.revenue, { className: "amount-sm" })}</div>
-        <p class="home-metric-label">Cash reçu</p><div>${amountHtml(report.cashCollected, { className: "amount-sm" })}</div>
-        <p class="home-metric-label">Crédit accordé</p><div>${amountHtml(report.creditIssued, { className: "amount-sm" })}</div>
-        <p class="home-metric-label">Coût des ventes</p><div>${amountHtml(report.cogs, { className: "amount-sm" })}</div>
-        <p class="home-metric-label">Dépenses d'exploitation</p><div>${amountHtml(report.operatingExpenses, { className: "amount-sm" })}</div>
-        <p class="home-metric-label">Résultat estimé</p><div>${amountHtml(report.estimatedProfit, { className: "amount-sm", signed: true })}</div>
-        <p class="home-metric-label">Unités vendues</p><p class="metric-plain">${report.unitsSold}</p>
+      <article class="hero-card">
+        <p class="hero-kicker">Résultat estimé</p>
+        <div>${amountHtml(report.estimatedProfit, { signed: true })}</div>
+        <div class="hero-metrics">
+          <div class="hero-metric"><span>Ventes</span><strong>${escapeHtml(formatFcfa(report.revenue))}</strong></div>
+          <div class="hero-metric"><span>Dépenses</span><strong>${escapeHtml(formatFcfa(report.operatingExpenses))}</strong></div>
+          <div class="hero-metric"><span>Cash reçu</span><strong>${escapeHtml(formatFcfa(report.cashCollected))}</strong></div>
+        </div>
       </article>
-      <div class="fund-grid">
-        <article class="card"><p class="home-metric-label">À recevoir</p><div>${amountHtml(report.receivablesTotal, { className: "amount-sm" })}</div></article>
-        <article class="card"><p class="home-metric-label">À payer</p><div>${amountHtml(report.payablesTotal, { className: "amount-sm" })}</div></article>
-      </div>
-      <p class="field-hint">Le résultat = recettes − coût des sacs vendus − dépenses d'exploitation. Les frais déjà inclus dans un arrivage ne sont pas retranchés une seconde fois. Une créance n'est pas du cash.</p>
+      <article class="chart-card">
+        <h2 class="section-title">Recettes, coûts et dépenses</h2>
+        <div class="chart-frame">
+          <canvas data-role="business-report-chart" aria-label="Recettes, coûts et dépenses"></canvas>
+        </div>
+      </article>
+      <article class="list-card">
+        <div class="today-metrics">
+          <div class="today-metric"><span>Crédit des ventes</span><strong>${escapeHtml(formatFcfa(report.creditIssued))}</strong></div>
+          <div class="today-metric"><span>Montant fournisseur vendu</span><strong>${escapeHtml(formatFcfa(report.cogs))}</strong></div>
+          <div class="today-metric"><span>Unités vendues</span><strong>${escapeHtml(String(report.unitsSold))}</strong></div>
+          <div class="today-metric"><span>À recevoir</span><strong>${escapeHtml(formatFcfa(report.receivablesTotal))}</strong></div>
+          <div class="today-metric"><span>À payer</span><strong>${escapeHtml(formatFcfa(report.payablesTotal))}</strong></div>
+        </div>
+      </article>
+      <p class="field-hint">Le résultat = ventes − montant fournisseur des sacs vendus − dépenses d'exploitation. Les frais d'arrivage (transport, déchargement) ne sont pas retranchés de la marge. Une créance n'est pas du cash. « Crédit des ventes » = non encaissé à la vente, pas le reste actuel des clients.</p>
     `;
+    renderGroupedBarChart(body.querySelector('[data-role="business-report-chart"]'), {
+      labels: [title],
+      series: [
+        { label: "Recettes", values: [report.revenue || 0], color: "#F28C28" },
+        { label: "Fournisseur", values: [report.cogs || 0], color: "#C56A12" },
+        { label: "Dépenses", values: [report.operatingExpenses || 0], color: "#B83A3A" },
+      ],
+    });
   } catch (err) {
     body.innerHTML = errorStateHtml(friendlyError(err));
   }

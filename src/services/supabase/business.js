@@ -7,15 +7,22 @@ import { getSupabase, getSupabaseOrThrow } from "./client.js";
 import { recordAuditEvent, recordAuditEventSafe } from "./audit.js";
 import {
   calculateArrivalExpenses,
+  allocatePaymentFifo,
   calculateCustomerOutstanding,
-  calculateEffectiveBatchCost,
-  calculateEffectiveUnitCost,
   calculateMerchandiseValue,
   calculateOperatingExpenses,
   calculatePeriodBusinessTotals,
+  calculateSaleTotal,
   calculateSupplierOutstanding,
-  inferPaymentMethod,
+  computeSaleRemainders,
+  inferSettlementStatus,
+  paidNowForSettlement,
+  saleItemsTotal,
+  sumAvailableInventory,
+  sumRemainderOutstanding,
 } from "../../utils/business-calc.js";
+import { toFcfaInteger } from "../../utils/money.js";
+import { findCustomerByName, resolveSaleCustomer } from "../../utils/choice-ui.js";
 
 const ARRIVAL_SELECT = `
   id, supplier_id, product_id, arrival_date, quantity_received,
@@ -26,14 +33,14 @@ const ARRIVAL_SELECT = `
 `;
 
 const SALE_SELECT = `
-  id, customer_id, sale_date, payment_method, amount_paid_fcfa,
+  id, customer_id, sale_date, settlement_status, payment_method, amount_paid_fcfa,
   repayment_expectation, repayment_exact_date, repayment_approx_text,
   note, created_at, updated_at,
   customers ( id, name, phone ),
   sale_items (
     id, product_id, arrival_id, quantity, sale_unit_price_fcfa, effective_unit_cost_fcfa,
     products ( id, name, unit_type ),
-    stock_arrivals ( id, arrival_date, supplier_id, suppliers ( id, code, name ) )
+    stock_arrivals ( id, arrival_date, supplier_id, supplier_unit_price_fcfa, suppliers ( id, code, name ) )
   )
 `;
 
@@ -159,17 +166,33 @@ export async function getCustomer(id) {
 }
 
 export async function createCustomer(input) {
+  const name = String(input.name || "").trim();
+  if (!name) throw new Error("Indiquez le nom du client.");
+  const existing = findCustomerByName(await getCustomers(), name);
+  if (existing) {
+    const err = new Error("Ce client existe déjà. Sélectionnez-le dans la liste.");
+    err.code = "duplicate_customer";
+    throw err;
+  }
+
   const sb = getSupabaseOrThrow();
   const { data, error } = await sb
     .from("customers")
     .insert({
-      name: String(input.name || "").trim(),
+      name,
       phone: input.phone ? String(input.phone).trim() : null,
       note: input.note ? String(input.note).trim() : null,
     })
     .select("id, name, phone, note, is_active")
     .single();
-  if (error) throw error;
+  if (error) {
+    if (String(error.message || "").toLowerCase().includes("unique")) {
+      const err = new Error("Ce client existe déjà. Sélectionnez-le dans la liste.");
+      err.code = "duplicate_customer";
+      throw err;
+    }
+    throw error;
+  }
   await recordAuditEventSafe({
     entityTable: "customers",
     entityId: data.id,
@@ -315,61 +338,97 @@ export async function getSale(id) {
 }
 
 /**
- * One sale header + one line. If the line fails (stock), the header is removed.
+ * One sale header + one line. Prefers the atomic RPC; falls back to
+ * insert + compensating delete if the function is not deployed yet.
  */
 export async function createSale(input) {
   const sb = getSupabaseOrThrow();
-  let customerId = input.customerId;
-  if (!customerId && input.newCustomerName) {
+  const resolved = resolveSaleCustomer(input, await getCustomers());
+  let customerId = resolved.customerId;
+  if (resolved.shouldCreate && resolved.name) {
     const customer = await createCustomer({
-      name: input.newCustomerName,
+      name: resolved.name,
       phone: input.newCustomerPhone,
     });
     customerId = customer.id;
   }
-
-  const total = calculateMerchandiseValue(input.quantity, input.unitPrice);
-  const amountPaid = input.amountPaid || 0;
-  const method = input.paymentMethod || inferPaymentMethod(total, amountPaid);
-
-  const { data: sale, error: saleError } = await sb
-    .from("sales")
-    .insert({
-      customer_id: customerId,
-      sale_date: input.date,
-      payment_method: method,
-      amount_paid_fcfa: amountPaid,
-      repayment_expectation: input.repaymentExpectation || "undetermined",
-      repayment_exact_date: input.repaymentExactDate || null,
-      repayment_approx_text: input.repaymentApproxText || null,
-      note: input.note ? String(input.note).trim() : null,
-    })
-    .select("id")
-    .single();
-  if (saleError) throw saleError;
-
-  const { data: item, error: itemError } = await sb
-    .from("sale_items")
-    .insert({
-      sale_id: sale.id,
-      product_id: input.productId,
-      arrival_id: input.arrivalId,
-      quantity: input.quantity,
-      sale_unit_price_fcfa: input.unitPrice,
-      effective_unit_cost_fcfa: input.effectiveUnitCost,
-    })
-    .select("id")
-    .single();
-
-  if (itemError) {
-    await sb.from("sales").delete().eq("id", sale.id);
-    throw itemError;
+  if (!customerId) {
+    throw new Error("Choisissez ou créez un client.");
   }
 
-  const created = await getSale(sale.id);
+  const total = calculateMerchandiseValue(input.quantity, input.unitPrice);
+  const settlement = input.settlementStatus || inferSettlementStatus(total, input.amountPaid);
+  const amountPaid = paidNowForSettlement(settlement, total, input.amountPaid || 0);
+  const method = settlement === "credit" ? null : input.paymentMethod || "cash";
+  const note = input.note ? String(input.note).trim() : null;
+
+  const rpcArgs = {
+    p_customer_id: customerId,
+    p_sale_date: input.date,
+    p_payment_method: method,
+    p_amount_paid_fcfa: amountPaid,
+    p_repayment_expectation: input.repaymentExpectation || "undetermined",
+    p_repayment_exact_date: input.repaymentExactDate || null,
+    p_repayment_approx_text: input.repaymentApproxText || null,
+    p_note: note,
+    p_product_id: input.productId,
+    p_arrival_id: input.arrivalId,
+    p_quantity: input.quantity,
+    p_sale_unit_price_fcfa: input.unitPrice,
+    p_effective_unit_cost_fcfa: input.effectiveUnitCost ?? null,
+    p_settlement_status: settlement,
+  };
+
+  const { data: rpcSaleId, error: rpcError } = await sb.rpc("create_sale_with_item", rpcArgs);
+  let saleId = rpcSaleId;
+
+  if (rpcError) {
+    const missingRpc =
+      /could not find the function|pgrst202|404/i.test(rpcError.message || "") ||
+      rpcError.code === "PGRST202";
+    if (!missingRpc) throw rpcError;
+
+    const { data: sale, error: saleError } = await sb
+      .from("sales")
+      .insert({
+        customer_id: customerId,
+        sale_date: input.date,
+        settlement_status: settlement,
+        payment_method: method,
+        amount_paid_fcfa: amountPaid,
+        repayment_expectation: input.repaymentExpectation || "undetermined",
+        repayment_exact_date: input.repaymentExactDate || null,
+        repayment_approx_text: input.repaymentApproxText || null,
+        note,
+      })
+      .select("id")
+      .single();
+    if (saleError) throw saleError;
+
+    const { error: itemError } = await sb
+      .from("sale_items")
+      .insert({
+        sale_id: sale.id,
+        product_id: input.productId,
+        arrival_id: input.arrivalId,
+        quantity: input.quantity,
+        sale_unit_price_fcfa: input.unitPrice,
+        effective_unit_cost_fcfa: input.effectiveUnitCost,
+      })
+      .select("id")
+      .single();
+
+    if (itemError) {
+      await sb.from("sales").delete().eq("id", sale.id);
+      throw itemError;
+    }
+    saleId = sale.id;
+  }
+
+  const created = await getSale(saleId);
   await recordAuditEventSafe({
     entityTable: "sales",
-    entityId: sale.id,
+    entityId: saleId,
     action: "insert",
     newValues: snapshotSale(created),
   });
@@ -408,7 +467,7 @@ export async function getCustomerPayments(filters = {}) {
   const sb = getSupabaseOrThrow();
   let query = sb
     .from("customer_payments")
-    .select("id, customer_id, sale_id, amount_fcfa, payment_date, note, created_at, customers ( id, name )")
+    .select("id, customer_id, sale_id, amount_fcfa, payment_method, payment_date, note, created_at, customers ( id, name )")
     .order("payment_date", { ascending: false })
     .order("created_at", { ascending: false });
   if (filters.customerId) query = query.eq("customer_id", filters.customerId);
@@ -421,25 +480,46 @@ export async function getCustomerPayments(filters = {}) {
 
 export async function createCustomerPayment(input) {
   const sb = getSupabaseOrThrow();
+  const amount = toFcfaInteger(input.amount);
+  const method = input.paymentMethod || "cash";
+  const note = input.note ? String(input.note).trim() : null;
+
+  const [sales, existingPayments] = await Promise.all([
+    getSales(),
+    getCustomerPayments({ customerId: input.customerId }),
+  ]);
+  const customerSales = sales.filter((s) => s.customer_id === input.customerId);
+  const remainders = computeSaleRemainders(customerSales, existingPayments);
+  const outstanding = sumRemainderOutstanding(remainders);
+  if (amount > outstanding) {
+    throw new Error("Le montant dépasse la somme due.");
+  }
+
+  const { allocations } = allocatePaymentFifo(remainders, amount);
+  const rows = (allocations.length ? allocations : [{ saleId: input.saleId || null, amount }]).map((alloc) => ({
+    customer_id: input.customerId,
+    sale_id: alloc.saleId || null,
+    amount_fcfa: alloc.amount,
+    payment_method: method,
+    payment_date: input.date,
+    note,
+  }));
+
   const { data, error } = await sb
     .from("customer_payments")
-    .insert({
-      customer_id: input.customerId,
-      sale_id: input.saleId || null,
-      amount_fcfa: input.amount,
-      payment_date: input.date,
-      note: input.note ? String(input.note).trim() : null,
-    })
-    .select("id, customer_id, sale_id, amount_fcfa, payment_date, note")
-    .single();
+    .insert(rows)
+    .select("id, customer_id, sale_id, amount_fcfa, payment_method, payment_date, note");
   if (error) throw error;
-  await recordAuditEventSafe({
-    entityTable: "customer_payments",
-    entityId: data.id,
-    action: "insert",
-    newValues: data,
-  });
-  return data;
+  const created = data || [];
+  for (const row of created) {
+    await recordAuditEventSafe({
+      entityTable: "customer_payments",
+      entityId: row.id,
+      action: "insert",
+      newValues: row,
+    });
+  }
+  return created[0] || null;
 }
 
 export async function getSupplierPayments(filters = {}) {
@@ -464,11 +544,12 @@ export async function createSupplierPayment(input) {
     .insert({
       supplier_id: input.supplierId,
       arrival_id: input.arrivalId || null,
-      amount_fcfa: input.amount,
+      amount_fcfa: toFcfaInteger(input.amount),
+      payment_method: input.paymentMethod || "cash",
       payment_date: input.date,
       note: input.note ? String(input.note).trim() : null,
     })
-    .select("id, supplier_id, arrival_id, amount_fcfa, payment_date, note")
+    .select("id, supplier_id, arrival_id, amount_fcfa, payment_method, payment_date, note")
     .single();
   if (error) throw error;
   await recordAuditEventSafe({
@@ -501,7 +582,7 @@ export async function createExpense(input) {
     .from("business_expenses")
     .insert({
       category: input.category,
-      amount_fcfa: input.amount,
+      amount_fcfa: toFcfaInteger(input.amount),
       expense_date: input.date,
       arrival_id: input.arrivalId || null,
       is_arrival_cost_allocation: Boolean(input.isArrivalCostAllocation),
@@ -586,26 +667,30 @@ export async function getCustomerBalances() {
   return customers
     .map((customer) => {
       const customerSales = sales.filter((s) => s.customer_id === customer.id);
-      const purchases = customerSales.reduce((sum, sale) => sum + saleTotal(sale), 0);
-      const paidAtSale = customerSales.reduce((sum, sale) => sum + (sale.amount_paid_fcfa || 0), 0);
-      const later = payments
-        .filter((p) => p.customer_id === customer.id)
-        .reduce((sum, p) => sum + p.amount_fcfa, 0);
+      const purchases = customerSales.reduce((sum, sale) => sum + saleItemsTotal(sale), 0);
+      const paidAtSale = customerSales.reduce(
+        (sum, sale) => sum + toFcfaInteger(sale.amount_paid_fcfa),
+        0,
+      );
+      const laterPayments = payments.filter((p) => p.customer_id === customer.id);
+      const later = laterPayments.reduce((sum, p) => sum + toFcfaInteger(p.amount_fcfa), 0);
       const outstanding = calculateCustomerOutstanding({
         purchases,
         paidAtSale,
         payments: later,
       });
-      const oldestUnpaid = customerSales
-        .filter((sale) => saleTotal(sale) > (sale.amount_paid_fcfa || 0))
-        .map((sale) => sale.repayment_exact_date || sale.sale_date)
-        .sort()[0] || null;
+      const remainders = computeSaleRemainders(customerSales, laterPayments);
+      const lastPayment = laterPayments[0] || null;
+      const dueSale = remainders.find((row) => row.remaining > 0)?.sale || null;
       return {
         customer,
         purchases,
         paid: paidAtSale + later,
         outstanding,
-        oldestUnpaid,
+        oldestUnpaid: dueSale?.repayment_exact_date || dueSale?.sale_date || null,
+        dueSale,
+        lastPayment,
+        remainders,
         sales: customerSales,
       };
     })
@@ -637,7 +722,7 @@ export async function getSupplierBalances() {
             unloading: arrival.unloading_fcfa,
             other: arrival.other_expenses_fcfa,
           });
-        merchandise += merch;
+        merchandise += toFcfaInteger(merch);
         obligation += calculateSupplierOutstanding({
           merchandiseValue: merch,
           arrivalExpenses: expenses,
@@ -645,11 +730,11 @@ export async function getSupplierBalances() {
           advancePaid: 0,
           paymentsTotal: 0,
         });
-        advances += arrival.advance_paid_fcfa || 0;
+        advances += toFcfaInteger(arrival.advance_paid_fcfa);
       }
       const paidLater = payments
         .filter((p) => p.supplier_id === supplier.id)
-        .reduce((sum, p) => sum + p.amount_fcfa, 0);
+        .reduce((sum, p) => sum + toFcfaInteger(p.amount_fcfa), 0);
       const outstanding = Math.max(0, obligation - advances - paidLater);
       return {
         supplier,
@@ -676,6 +761,7 @@ export async function getCustomerDetail(id) {
     outstanding: row?.outstanding ?? 0,
     sales: row?.sales ?? [],
     payments,
+    remainders: row?.remainders ?? computeSaleRemainders(row?.sales || [], payments),
   };
 }
 
@@ -710,32 +796,29 @@ export async function getBordereau(id) {
       .filter((item) => item.arrival_id === id)
       .map((item) => ({ ...item, sale })),
   );
-  const sold = inv?.quantity_sold ?? 0;
+  const sold = toFcfaInteger(inv?.quantity_sold);
   const remaining = inv?.quantity_remaining ?? arrival.quantity_received;
   const revenue = items.reduce(
-    (sum, item) => sum + item.quantity * item.sale_unit_price_fcfa,
+    (sum, item) => sum + calculateSaleTotal(item.quantity, item.sale_unit_price_fcfa),
     0,
   );
-  const unitCost = cost?.effective_unit_cost_fcfa
-    ?? calculateEffectiveUnitCost(
-      calculateEffectiveBatchCost({
-        quantity: arrival.quantity_received,
-        unitPrice: arrival.supplier_unit_price_fcfa,
+  const supplierMerchandiseSold = calculateMerchandiseValue(
+    sold,
+    arrival.supplier_unit_price_fcfa,
+  );
+  const payments = await getSupplierPayments();
+  const arrivalPayments = payments
+    .filter((p) => p.arrival_id === id)
+    .reduce((sum, p) => sum + toFcfaInteger(p.amount_fcfa), 0);
+  const outstanding = calculateSupplierOutstanding({
+    merchandiseValue: cost?.merchandise_value_fcfa
+      ?? calculateMerchandiseValue(arrival.quantity_received, arrival.supplier_unit_price_fcfa),
+    arrivalExpenses: cost?.arrival_expenses_fcfa
+      ?? calculateArrivalExpenses({
         transport: arrival.transport_fcfa,
         unloading: arrival.unloading_fcfa,
         other: arrival.other_expenses_fcfa,
       }),
-      arrival.quantity_received,
-    );
-  const cogs = sold * (unitCost || 0);
-  const payments = await getSupplierPayments();
-  const arrivalPayments = payments
-    .filter((p) => p.arrival_id === id)
-    .reduce((sum, p) => sum + p.amount_fcfa, 0);
-  const outstanding = calculateSupplierOutstanding({
-    merchandiseValue: cost?.merchandise_value_fcfa
-      ?? calculateMerchandiseValue(arrival.quantity_received, arrival.supplier_unit_price_fcfa),
-    arrivalExpenses: cost?.arrival_expenses_fcfa ?? 0,
     expensesOwedToSupplier: arrival.expenses_owed_to_supplier,
     advancePaid: arrival.advance_paid_fcfa,
     paymentsTotal: arrivalPayments,
@@ -747,7 +830,7 @@ export async function getBordereau(id) {
     sold,
     remaining,
     revenue,
-    estimatedMargin: revenue - cogs,
+    estimatedMargin: revenue - supplierMerchandiseSold,
     outstanding,
     items,
   };
@@ -773,9 +856,9 @@ export async function getBusinessReport(range = {}) {
 
   return {
     ...totals,
-    receivablesTotal: receivables.reduce((sum, row) => sum + row.outstanding, 0),
-    payablesTotal: payables.reduce((sum, row) => sum + row.outstanding, 0),
-    stockUnits: inventory.reduce((sum, row) => sum + (row.quantity_available || 0), 0),
+    receivablesTotal: receivables.reduce((sum, row) => sum + toFcfaInteger(row.outstanding), 0),
+    payablesTotal: payables.reduce((sum, row) => sum + toFcfaInteger(row.outstanding), 0),
+    stockUnits: sumAvailableInventory(inventory),
     inventory,
     receivables,
     payables,
@@ -851,10 +934,7 @@ export async function getBusinessHistory(filters = {}) {
 }
 
 export function saleTotal(sale) {
-  return (sale.sale_items || []).reduce(
-    (sum, item) => sum + item.quantity * item.sale_unit_price_fcfa,
-    0,
-  );
+  return saleItemsTotal(sale);
 }
 
 function snapshotArrival(row) {
@@ -876,6 +956,7 @@ function snapshotSale(row) {
     id: row?.id,
     customer_id: row?.customer_id,
     sale_date: row?.sale_date,
+    settlement_status: row?.settlement_status,
     payment_method: row?.payment_method,
     amount_paid_fcfa: row?.amount_paid_fcfa,
     items: (row?.sale_items || []).map((item) => ({

@@ -1,6 +1,9 @@
 import { formatFcfa } from "../../utils/money.js";
 import { escapeHtml } from "../../utils/errors.js";
 import { ROUTES } from "../../router.js";
+import { iconHtml } from "../../components/icons.js";
+import { pageHeaderHtml as sharedPageHeaderHtml, backLinkHtml } from "../../components/page-header.js";
+import { sumAvailableInventory } from "../../utils/business-calc.js";
 
 export const BUSINESS_LINKS = {
   home: ROUTES.business,
@@ -18,6 +21,7 @@ export const BUSINESS_LINKS = {
   expenseNew: "/commerce/depenses/nouvelle",
   bordereaux: "/commerce/bordereaux",
   receivables: "/commerce/a-recevoir",
+  paymentNew: "/commerce/a-recevoir/paiement",
   payables: "/commerce/a-payer",
   history: "/commerce/historique",
   report: "/commerce/rapport",
@@ -34,29 +38,69 @@ export const EXPENSE_LABELS = {
   other: "Autre",
 };
 
-export const PAYMENT_LABELS = {
-  cash: "Espèces",
-  credit: "Crédit",
+export const SETTLEMENT_LABELS = {
+  paid: "Payé en totalité",
   partial: "Paiement partiel",
+  credit: "À crédit",
 };
 
-export function backLinkHtml(href, label = "Retour") {
+export const METHOD_LABELS = {
+  cash: "Espèces",
+  mobile_money: "Mobile Money",
+  bank: "Virement bancaire",
+};
+
+export const METHOD_OPTIONS = [
+  ["cash", "Espèces"],
+  ["mobile_money", "Mobile Money"],
+  ["bank", "Virement bancaire"],
+];
+
+export function methodCardsHtml(selected = "cash") {
   return `
-    <a class="back-link" href="#${href}">
-      <span aria-hidden="true">←</span> ${escapeHtml(label)}
-    </a>
+    <p class="field-label" id="pay-method-label">Mode de paiement</p>
+    <div class="method-cards" role="radiogroup" aria-labelledby="pay-method-label">
+      ${METHOD_OPTIONS.map(
+        ([value, label]) => `
+        <button type="button" class="method-card${selected === value ? " is-active" : ""}" data-method="${value}">
+          ${escapeHtml(label)}
+        </button>
+      `,
+      ).join("")}
+    </div>
+    <input type="hidden" name="paymentMethod" value="${escapeHtml(selected)}" />
+    <p class="field-error" data-error="paymentMethod" hidden></p>
   `;
 }
 
-export function pageHeaderHtml({ kicker = "Commerce", title, subtitle, backHref, backLabel }) {
-  return `
-    <header class="page-header">
-      ${backHref ? backLinkHtml(backHref, backLabel || "Retour au commerce") : ""}
-      ${kicker ? `<p class="page-kicker">${escapeHtml(kicker)}</p>` : ""}
-      <h1 class="page-title" id="business-title">${escapeHtml(title)}</h1>
-      ${subtitle ? `<p class="page-subtitle">${escapeHtml(subtitle)}</p>` : ""}
-    </header>
-  `;
+export function bindMethodCards(root) {
+  if (!root) return;
+  root.querySelectorAll("[data-method]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const hidden = root.querySelector('[name="paymentMethod"]');
+      if (hidden) hidden.value = btn.getAttribute("data-method") || "cash";
+      root.querySelectorAll("[data-method]").forEach((el) => el.classList.toggle("is-active", el === btn));
+    });
+  });
+}
+
+/** @deprecated mixed labels — use SETTLEMENT_LABELS / METHOD_LABELS */
+export const PAYMENT_LABELS = {
+  ...SETTLEMENT_LABELS,
+  ...METHOD_LABELS,
+  credit: "À crédit",
+  partial: "Paiement partiel",
+};
+
+export { backLinkHtml };
+
+export function pageHeaderHtml(props = {}) {
+  return sharedPageHeaderHtml({
+    kicker: "Commerce",
+    backLabel: "Retour au commerce",
+    titleId: "business-title",
+    ...props,
+  });
 }
 
 export function skeletonHtml(lines = 3) {
@@ -167,17 +211,63 @@ export function unitLabel(unitType = "sac", quantity = 1) {
   return unit;
 }
 
+/** Amount the supplier expects for each bag/unit — not a blended cost after fees. */
+export function supplierAmountPerUnitLabel(unitType = "sac") {
+  return `Montant fournisseur par ${unitType || "unité"}`;
+}
+
+/**
+ * Home stock row: the amount is actual available quantity, never a row/batch count.
+ * @param {{ href: string, inventory?: object[], stockUnits?: number }} props
+ */
+export function stockWatchHtml({ href, inventory = [], stockUnits }) {
+  const units = stockUnits ?? sumAvailableInventory(inventory);
+  const lowStock = (inventory || []).filter((row) => (Number(row.quantity_available) || 0) <= 2);
+  const hint = lowStock.length
+    ? lowStock
+        .slice(0, 2)
+        .map(
+          (row) =>
+            `${row.quantity_available} ${unitLabel(row.unit_type, row.quantity_available)} ${row.product_name}`,
+        )
+        .join(" · ")
+    : units === 0
+      ? "Aucune unité disponible"
+      : `${units} unité${units > 1 ? "s" : ""} disponible${units > 1 ? "s" : ""}`;
+
+  return `
+    <a class="list-row" href="#${href}">
+      <span class="list-row-icon${units <= 2 ? " is-out" : ""}">${iconHtml("package", { weight: "bold" })}</span>
+      <span class="list-row-body">
+        <span class="list-row-title">Stock</span>
+        <span class="list-row-meta">${escapeHtml(hint)}</span>
+      </span>
+      <span class="list-row-amount">${units}</span>
+    </a>
+  `;
+}
+
 export function kindBadgeHtml(kind) {
   const map = {
-    arrival: ["tx-kind-in", "↑", "ARRIVAGE"],
-    sale: ["tx-kind-out", "↓", "VENTE"],
-    customer_payment: ["tx-kind-in", "↑", "PAIEMENT CLIENT"],
-    supplier_payment: ["tx-kind-out", "↓", "PAIEMENT FOURNISSEUR"],
-    expense: ["tx-kind-out", "↓", "DÉPENSE"],
-    adjustment: ["tx-kind-out", "±", "STOCK"],
+    arrival: ["tx-kind-in", "truck", "ARRIVAGE"],
+    sale: ["tx-kind-out", "receipt", "VENTE"],
+    customer_payment: ["tx-kind-in", "hand-coins", "PAIEMENT CLIENT"],
+    supplier_payment: ["tx-kind-out", "credit-card", "PAIEMENT FOURNISSEUR"],
+    expense: ["tx-kind-out", "wallet", "DÉPENSE"],
+    adjustment: ["tx-kind-neutral", "package", "STOCK"],
   };
-  const [cls, icon, label] = map[kind] || ["tx-kind-in", "•", kind];
-  return `<span class="tx-kind ${cls}"><span aria-hidden="true">${icon}</span> ${label}</span>`;
+  const [cls, icon, label] = map[kind] || ["tx-kind-in", "dot", kind];
+  return `<span class="tx-kind ${cls}">${iconHtml(icon, { weight: "bold", size: "sm" })} ${label}</span>`;
+}
+
+export function paymentChipHtml(status) {
+  const map = {
+    paid: ["status-chip-ok", "Payé"],
+    partial: ["status-chip-warn", "Partiel"],
+    credit: ["status-chip-info", "À crédit"],
+  };
+  const [cls, label] = map[status] || ["status-chip-neutral", SETTLEMENT_LABELS[status] || METHOD_LABELS[status] || status];
+  return `<span class="status-chip ${cls}">${escapeHtml(label)}</span>`;
 }
 
 export function moneyInputHtml(id, name, label, hint) {

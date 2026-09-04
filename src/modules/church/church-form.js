@@ -1,4 +1,5 @@
 import { amountHtml } from "../../components/amount.js";
+import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field.js";
 import { confirmAndWrite } from "../../components/confirm-modal.js";
 import { navigate, ROUTES } from "../../router.js";
 import {
@@ -9,7 +10,8 @@ import {
   updateChurchTransaction,
 } from "../../services/supabase/church.js";
 import { formatFcfa } from "../../utils/money.js";
-import { formatLongDateFr, todayIso } from "../../utils/dates.js";
+import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
+import { displayDateFr, todayIso } from "../../utils/dates.js";
 import { friendlyError, escapeHtml } from "../../utils/errors.js";
 import { createSubmitGuard } from "../../utils/submit-guard.js";
 import {
@@ -22,7 +24,6 @@ import {
   clearFieldErrors,
   errorStateHtml,
   fundName,
-  fundSelectHtml,
   pageHeaderHtml,
   setFieldError,
   skeletonHtml,
@@ -116,13 +117,16 @@ function formHtml({ funds, existing, draft, type, isExpense }) {
 
   return `
     <form class="church-form stack" data-role="form" novalidate>
-      <div class="field">
-        <label class="field-label" for="church-fund">Caisse</label>
-        <select id="church-fund" name="fundId" class="field-input" required>
-          ${fundSelectHtml(funds, fundId)}
-        </select>
-        <p class="field-error" data-error="fundId" hidden></p>
-      </div>
+      ${choiceFieldHtml({
+        id: "church-fund",
+        name: "fundId",
+        label: "Caisse",
+        options: funds,
+        selectedId: fundId,
+        placeholder: "Choisir une caisse",
+        labelFn: (fund) => fundName(fund),
+        emptyTitle: "Aucune caisse disponible.",
+      })}
 
       <div class="field">
         <label class="field-label" for="church-amount">Montant</label>
@@ -133,7 +137,7 @@ function formHtml({ funds, existing, draft, type, isExpense }) {
           inputmode="numeric"
           autocomplete="off"
           enterkeyhint="next"
-          placeholder="ex. 150 000"
+          placeholder="Ex. 150 000"
           value="${escapeHtml(amountValue)}"
           data-amount="${escapeHtml(amountRaw)}"
           aria-describedby="church-amount-hint"
@@ -143,18 +147,7 @@ function formHtml({ funds, existing, draft, type, isExpense }) {
         <p class="field-error" data-error="amount" hidden></p>
       </div>
 
-      <div class="field">
-        <label class="field-label" for="church-date">Date</label>
-        <input
-          id="church-date"
-          name="date"
-          class="field-input"
-          type="date"
-          value="${escapeHtml(date)}"
-          required
-        />
-        <p class="field-error" data-error="date" hidden></p>
-      </div>
+      ${dateFieldHtml({ id: "church-date", name: "date", label: "Date", value: date })}
 
       <div class="field">
         <label class="field-label" for="church-reason">Motif</label>
@@ -165,7 +158,7 @@ function formHtml({ funds, existing, draft, type, isExpense }) {
           type="text"
           maxlength="200"
           value="${escapeHtml(reason)}"
-          placeholder="${isExpense ? "Achat de ciment" : "Offrandes dimanche"}"
+          placeholder="${isExpense ? "Ex. Achat de ciment" : "Ex. Offrandes dimanche"}"
           required
         />
         <p class="field-error" data-error="reason" hidden></p>
@@ -179,7 +172,7 @@ function formHtml({ funds, existing, draft, type, isExpense }) {
           class="field-input field-textarea"
           rows="3"
           maxlength="500"
-          placeholder="Précision utile…"
+          placeholder="Ex. Paiement prévu vendredi"
         >${escapeHtml(note)}</textarea>
       </div>
 
@@ -225,6 +218,8 @@ function bindForm(body, ctx) {
   if (!form || !(amountInput instanceof HTMLInputElement)) return;
 
   bindMoneyInput(amountInput);
+  bindChoiceFields(form);
+  bindDateFields(form);
   const guard = createSubmitGuard();
 
   form.addEventListener("input", () => {
@@ -290,7 +285,7 @@ async function handleSubmit(form, ctx) {
       : [
           { label: "Caisse", value: fundName(fund) },
           { label: "Motif", value: validated.reason },
-          { label: "Date", value: formatLongDateFr(values.date) },
+          { label: "Date", value: displayDateFr(values.date) },
           ...(values.note.trim()
             ? [{ label: "Note", value: values.note.trim() }]
             : []),
@@ -302,7 +297,8 @@ async function handleSubmit(form, ctx) {
         amountHtml: amountHtml(validated.amount),
         extraHtml,
         rows,
-        confirmLabel: isEdit ? "Confirmer la modification" : "Confirmer et enregistrer",
+        confirmLabel: "Confirmer",
+        cancelLabel: "Modifier",
         cancelLabel: "Modifier",
       },
       async () => {
@@ -348,7 +344,7 @@ function confirmTitle(type, isEdit) {
 function negativeWarningHtml({ current, expense, expected }) {
   return `
     <div class="warning-box" role="alert">
-      <p class="warning-box-title">⚠ Cette sortie rendra la caisse négative.</p>
+      <p class="warning-box-title">Cette sortie rendra la caisse négative.</p>
       <p>Solde actuel : <strong>${escapeHtml(formatFcfa(current))}</strong></p>
       <p>Sortie : <strong>${escapeHtml(formatFcfa(expense))}</strong></p>
       <p>Solde prévu : <strong>${escapeHtml(formatFcfa(expected))}</strong></p>
@@ -376,8 +372,8 @@ function editRows(existing, next) {
     },
     {
       label: "Date",
-      old: formatLongDateFr(existing?.transaction_date),
-      next: formatLongDateFr(next.date),
+      old: displayDateFr(existing?.transaction_date),
+      next: displayDateFr(next.date),
     },
     {
       label: "Note",

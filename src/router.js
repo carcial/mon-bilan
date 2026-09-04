@@ -24,6 +24,8 @@ export const ROUTES = {
   moreReport: "/plus/rapport",
   moreExport: "/plus/export",
   moreActivity: "/plus/activite",
+  moreReminders: "/plus/rappels",
+  businessQuickActions: "/commerce/quick-actions",
 };
 
 export function getHashPath() {

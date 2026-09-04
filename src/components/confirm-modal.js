@@ -49,7 +49,7 @@ export function confirmAndWrite(options, writeFn) {
     amountHtml = "",
     extraHtml = "",
     rows = [],
-    confirmLabel = "Confirmer et enregistrer",
+    confirmLabel = "Confirmer",
     cancelLabel = "Modifier",
     danger = false,
   } = options;
@@ -90,8 +90,8 @@ export function confirmAndWrite(options, writeFn) {
     const rowsHtml = rows
       .map(
         (row) => `
-        <div class="row-between" style="padding:0.5rem 0;border-bottom:1px solid var(--color-border)">
-          <span style="color:var(--color-text-secondary)">${escapeHtml(row.label)}</span>
+        <div class="confirm-row">
+          <span>${escapeHtml(row.label)}</span>
           <strong>${escapeHtml(row.value)}</strong>
         </div>`,
       )
@@ -100,12 +100,12 @@ export function confirmAndWrite(options, writeFn) {
     root.innerHTML = `
       <div class="modal-backdrop" data-role="backdrop" role="presentation">
         <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
-          <h2 id="confirm-title" class="page-title" style="font-size:var(--text-xl)">${escapeHtml(title)}</h2>
+          <h2 id="confirm-title" class="page-title">${escapeHtml(title)}</h2>
           ${amountHtml ? `<div class="confirm-amount">${amountHtml}</div>` : ""}
           ${extraHtml ? `<div class="confirm-extra">${extraHtml}</div>` : ""}
-          <div class="stack-sm confirm-rows">${rowsHtml}</div>
+          <div class="confirm-rows">${rowsHtml}</div>
           <p class="sr-only" data-role="status" aria-live="polite"></p>
-          <p data-role="error" hidden style="color:var(--color-negative);margin-bottom:1rem;font-weight:600"></p>
+          <p class="field-error" data-role="error" hidden></p>
           <div class="stack-sm">
             <button type="button" class="btn ${danger ? "btn-danger" : "btn-primary"} btn-block" data-action="confirm">${escapeHtml(confirmLabel)}</button>
             <button type="button" class="btn btn-ghost btn-block" data-action="edit">${escapeHtml(cancelLabel)}</button>

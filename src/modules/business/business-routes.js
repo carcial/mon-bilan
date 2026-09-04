@@ -6,6 +6,8 @@ export function matchBusinessRoute(path) {
 
   const [head, id, tail] = rest;
 
+  if (head === "quick-actions") return { name: "quick-actions" };
+
   if (head === "vente" && !id) return { name: "sale" };
   if (head === "vente" && id) return { name: "sale-detail", id };
   if (head === "arrivee") return { name: "arrival" };
@@ -25,6 +27,7 @@ export function matchBusinessRoute(path) {
   if (head === "depenses") return { name: "expenses" };
   if (head === "bordereaux") return { name: "bordereaux" };
   if (head === "bordereau" && id) return { name: "bordereau", id };
+  if (head === "a-recevoir" && id === "paiement") return { name: "customer-payment" };
   if (head === "a-recevoir") return { name: "receivables" };
   if (head === "a-payer") return { name: "payables" };
   if (head === "historique") return { name: "history" };
@@ -52,3 +55,8 @@ export function businessCustomerPath(id) {
 export function businessSupplierPath(id) {
   return `/commerce/fournisseurs/${id}`;
 }
+
+export function businessQuickActionsPath() {
+  return `/commerce/quick-actions`;
+}
+

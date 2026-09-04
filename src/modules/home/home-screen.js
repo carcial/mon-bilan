@@ -1,85 +1,40 @@
-import { amountHtml } from "../../components/amount.js";
-import { greetingForNow } from "../../utils/dates.js";
 import { isSupabaseConfigured } from "../../config.js";
-import { ROUTES } from "../../router.js";
+import { iconHtml } from "../../components/icons.js";
+import { renderBusinessDashboard } from "../business/business-dashboard.js";
+import { renderChurchDashboard } from "../church/church-dashboard.js";
+import { APP_MODES, getAppMode } from "../../state/app-mode.js";
 
 /**
- * Home screen — two separate financial universes (Church / Business).
+ * Home is the selected-mode dashboard. Commerce and Église are never mixed here.
  *
  * @param {HTMLElement} root
- * @param {{ churchBalance?: number | null, businessResult?: number | null }} [data]
+ * @param {{ onChanged?: () => void }} [ctx]
  */
-export function renderHomeScreen(root, data = {}) {
-  const greeting = greetingForNow();
-  const churchBalance = data.churchBalance ?? null;
-  const businessResult = data.businessResult ?? null;
+export function renderHomeScreen(root, ctx = {}) {
   const configured = isSupabaseConfigured();
+  const mode = getAppMode();
 
-  root.innerHTML = `
-    <section class="page home-page" aria-labelledby="home-title">
-      ${
-        configured
-          ? ""
-          : `
-        <div class="config-banner" role="status">
-          <span aria-hidden="true">ℹ</span>
-          <div>
-            <strong>Configuration Supabase requise</strong>
-            Copiez <code>.env.example</code> vers <code>.env</code>,
-            renseignez l’URL et la clé publishable, puis appliquez les migrations.
-          </div>
-        </div>
-      `
-      }
+  if (mode === APP_MODES.church) {
+    renderChurchDashboard(root, { ...ctx, embedded: true });
+  } else {
+    renderBusinessDashboard(root, { ...ctx, embedded: true });
+  }
 
-      <header class="home-greeting">
-        <h1 id="home-title">${greeting}</h1>
-        <p>Que voulez-vous faire ?</p>
-      </header>
+  if (configured) return;
 
-      <div class="home-cards stack">
-        <article class="card card-accent-church">
-          <div class="card-icon" aria-hidden="true">⛪</div>
-          <h2 class="card-label">Église</h2>
-          <p class="card-meta">Trésorerie des caisses (hors commerce)</p>
-
-          <p class="home-metric-label">Solde Église actuel</p>
-          <div class="home-metric-value">
-            ${
-              churchBalance === null
-                ? `<span class="amount amount-sm">— <span class="amount-unit">FCFA</span></span>`
-                : amountHtml(churchBalance)
-            }
-          </div>
-
-          <div class="actions-grid">
-            <a class="btn btn-secondary" href="#${ROUTES.church}/entree">+ Entrée</a>
-            <a class="btn btn-secondary" href="#${ROUTES.church}/sortie">− Sortie</a>
-            <a class="btn btn-primary btn-wide" href="#${ROUTES.church}">Voir le rapport</a>
-          </div>
-        </article>
-
-        <article class="card card-accent-business">
-          <div class="card-icon" aria-hidden="true">🛒</div>
-          <h2 class="card-label">Commerce</h2>
-          <p class="card-meta">Ventes, stock et créditeurs (hors église)</p>
-
-          <p class="home-metric-label">Résultat du mois</p>
-          <div class="home-metric-value">
-            ${
-              businessResult === null
-                ? `<span class="amount amount-sm">— <span class="amount-unit">FCFA</span></span>`
-                : amountHtml(businessResult, { signed: true })
-            }
-          </div>
-
-          <div class="actions-grid">
-            <a class="btn btn-secondary" href="#${ROUTES.business}/vente">Nouvelle vente</a>
-            <a class="btn btn-secondary" href="#${ROUTES.business}/arrivee">Nouvelle arrivée</a>
-            <a class="btn btn-primary btn-wide" href="#${ROUTES.business}">Voir le commerce</a>
-          </div>
-        </article>
+  const page = root.querySelector(".page");
+  if (!page) return;
+  page.insertAdjacentHTML(
+    "afterbegin",
+    `
+    <div class="config-banner" role="status">
+      ${iconHtml("info", { weight: "fill", size: "md" })}
+      <div>
+        <strong>Configuration Supabase requise</strong>
+        Copiez <code>.env.example</code> vers <code>.env</code>,
+        renseignez l’URL et la clé publishable, puis appliquez les migrations.
       </div>
-    </section>
-  `;
+    </div>
+  `,
+  );
 }

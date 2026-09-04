@@ -18,11 +18,22 @@ function showUpdateBanner(registration) {
   document.body.appendChild(banner);
 }
 
+export function getServiceWorkerUrl() {
+  return `${import.meta.env.BASE_URL}sw.js`;
+}
+
+export async function ensureServiceWorkerRegistration() {
+  if (!("serviceWorker" in navigator)) {
+    throw new Error("Rappels indisponibles sur cet appareil.");
+  }
+  return navigator.serviceWorker.register(getServiceWorkerUrl());
+}
+
 export function registerServiceWorker() {
   if (!("serviceWorker" in navigator)) return;
   if (!import.meta.env.PROD) return;
 
-  const swUrl = `${import.meta.env.BASE_URL}sw.js`;
+  const swUrl = getServiceWorkerUrl();
 
   window.addEventListener("load", async () => {
     try {

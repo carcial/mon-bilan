@@ -1,32 +1,69 @@
-/* Design tokens — Mon Bilan */
+/* Design tokens — Mon Bilan (Phase 4.5) */
 :root {
-  /* Colors */
-  --color-bg: #fff9f2;
-  --color-surface: #ffffff;
-  --color-primary: #f28c28;
-  --color-primary-soft: #ffe2be;
-  --color-primary-pale: #fff2e2;
-  --color-text: #222222;
-  --color-text-secondary: #68635e;
-  --color-positive: #25835a;
-  --color-negative: #b83a3a;
-  --color-info: #356a8a;
-  --color-border: #eadfd0;
-  --color-border-strong: #d9cbb8;
-  --color-overlay: rgba(34, 34, 34, 0.45);
-  --color-focus: #c56a12;
+  --bg: #f7f4ef;
+  --surface: #ffffff;
+  --surface-soft: #fbf8f3;
+  --text-primary: #1f1b16;
+  --text-secondary: #6b6560;
+  --border: #e8e2da;
+  --border-strong: #d6cfc4;
+  --shadow: 0 8px 24px rgba(48, 36, 20, 0.05);
+  --shadow-soft: 0 2px 10px rgba(48, 36, 20, 0.04);
+  --overlay: rgba(31, 27, 22, 0.42);
 
-  /* Typography */
-  --font-display: "Fraunces", "Georgia", serif;
-  --font-body: "DM Sans", system-ui, sans-serif;
-  --text-xs: 0.875rem;
-  --text-sm: 1rem;
-  --text-md: 1.125rem;
-  --text-lg: 1.375rem;
-  --text-xl: 1.75rem;
-  --text-2xl: 2.125rem;
-  --text-3xl: 2.5rem;
-  --text-amount: clamp(1.75rem, 5vw, 2.5rem);
+  --commerce-primary: #f28c28;
+  --commerce-primary-strong: #e07b18;
+  --commerce-soft: #fff5ea;
+  --commerce-softer: #fff9f3;
+  --commerce-tint: #ffe8cc;
+
+  --church-primary: #5e63d8;
+  --church-primary-strong: #4f54c8;
+  --church-soft: #f3f4ff;
+  --church-softer: #f7f7ff;
+  --church-tint: #e4e6fb;
+
+  --success: #25835a;
+  --success-soft: #e4f3eb;
+  --warning: #c56a12;
+  --warning-soft: #fff1de;
+  --danger: #b83a3a;
+  --danger-soft: #fdeceb;
+  --info: #4b6fa8;
+  --info-soft: #e8f1f6;
+
+  --accent: var(--commerce-primary);
+  --accent-strong: var(--commerce-primary-strong);
+  --accent-soft: var(--commerce-soft);
+  --accent-softer: var(--commerce-softer);
+  --accent-tint: var(--commerce-tint);
+  --focus: #c56a12;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-primary: var(--accent);
+  --color-primary-soft: var(--accent-tint);
+  --color-primary-pale: var(--accent-soft);
+  --color-text: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-positive: var(--success);
+  --color-negative: var(--danger);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-overlay: var(--overlay);
+  --color-focus: var(--focus);
+
+  --font-display: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --text-xs: 0.8125rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2rem;
+  --text-amount: clamp(2rem, 5.4vw, 2.55rem);
   --line-tight: 1.2;
   --line-normal: 1.45;
   --weight-regular: 400;
@@ -34,35 +71,49 @@
   --weight-semibold: 600;
   --weight-bold: 700;
 
-  /* Spacing */
   --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
+  --space-2: 0.5rem; /* 8px — small internal */
+  --space-3: 0.75rem; /* 12px — small internal */
+  --space-4: 1rem; /* 16px — field-to-field */
+  --space-5: 1.25rem; /* 20px — card internal */
+  --space-6: 1.5rem; /* 24px — section gap */
+  --space-8: 2rem; /* 32px — major section */
   --space-10: 2.5rem;
   --space-12: 3rem;
 
-  /* Layout */
   --radius-sm: 0.75rem;
-  --radius-md: 1.25rem;
-  --radius-lg: 1.75rem;
+  --radius-md: 1.15rem;
+  --radius-lg: 1.35rem;
+  --radius-hero: 1.7rem;
   --radius-pill: 999px;
   --touch-min: 48px;
-  --nav-height: 4.5rem;
-  --content-max: 40rem;
+  --nav-height: 4.75rem;
+  --topbar-height: 4.25rem;
+  --sidebar-width: 15.5rem;
+  --content-max: 72rem;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-top: env(safe-area-inset-top, 0px);
 
-  /* Elevation */
-  --shadow-card: 0 8px 24px rgba(88, 55, 20, 0.06);
-  --shadow-nav: 0 -4px 24px rgba(88, 55, 20, 0.08);
-  --shadow-modal: 0 16px 48px rgba(34, 34, 34, 0.18);
+  --shadow-card: var(--shadow-soft);
+  --shadow-nav: 0 -2px 18px rgba(48, 36, 20, 0.06);
+  --shadow-modal: 0 16px 40px rgba(31, 27, 22, 0.16);
 
-  /* Motion */
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --duration-fast: 150ms;
-  --duration-normal: 250ms;
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+  --duration-fast: 160ms;
+  --duration-normal: 240ms;
+}
+
+html[data-mode="eglise"] {
+  --bg: #f4f5fb;
+  --surface-soft: #f7f7ff;
+  --accent: var(--church-primary);
+  --accent-strong: var(--church-primary-strong);
+  --accent-soft: var(--church-soft);
+  --accent-softer: var(--church-softer);
+  --accent-tint: var(--church-tint);
+  --focus: #4f54c8;
+  --shadow: 0 8px 24px rgba(40, 44, 90, 0.05);
+  --shadow-soft: 0 2px 10px rgba(40, 44, 90, 0.04);
+  --shadow-nav: 0 -2px 18px rgba(40, 44, 90, 0.06);
 }

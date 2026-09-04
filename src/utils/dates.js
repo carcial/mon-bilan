@@ -40,6 +40,18 @@ export function parseLocalDate(input) {
     return Number.isNaN(d.getTime()) ? null : d;
   }
 
+  const fr = trimmed.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})$/);
+  if (fr) {
+    const day = Number(fr[1]);
+    const month = Number(fr[2]);
+    const year = Number(fr[3]);
+    const d = new Date(year, month - 1, day);
+    if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) {
+      return null;
+    }
+    return d;
+  }
+
   const d = new Date(trimmed);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -77,7 +89,7 @@ export function formatShortDateFr(input) {
 }
 
 /**
- * 02/09/2026
+ * Canonical user-facing date: 03/09/2026
  * @param {Date | string} input
  */
 export function formatNumericDateFr(input) {
@@ -86,6 +98,18 @@ export function formatNumericDateFr(input) {
   const day = String(d.getDate()).padStart(2, "0");
   const month = String(d.getMonth() + 1).padStart(2, "0");
   return `${day}/${month}/${d.getFullYear()}`;
+}
+
+/** Alias used by UI — always DD/MM/YYYY. */
+export const displayDateFr = formatNumericDateFr;
+
+/**
+ * @param {string} text
+ * @returns {string | null} YYYY-MM-DD
+ */
+export function parseNumericDateFr(text) {
+  const d = parseLocalDate(text);
+  return d ? toIsoDate(d) : null;
 }
 
 /**
@@ -97,7 +121,7 @@ export function formatDateTimeFr(input) {
   if (!d) return "—";
   const hours = String(d.getHours()).padStart(2, "0");
   const minutes = String(d.getMinutes()).padStart(2, "0");
-  return `${formatLongDateFr(d)}, ${hours}:${minutes}`;
+  return `${formatNumericDateFr(d)}, ${hours}:${minutes}`;
 }
 
 export function toIsoDate(input = new Date()) {

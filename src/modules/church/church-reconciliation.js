@@ -1,4 +1,5 @@
 import { amountHtml } from "../../components/amount.js";
+import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field.js";
 import { confirmAndWrite } from "../../components/confirm-modal.js";
 import { ROUTES } from "../../router.js";
 import {
@@ -10,7 +11,8 @@ import {
   getReconciliations,
 } from "../../services/supabase/church.js";
 import { formatFcfa, toFcfaInteger } from "../../utils/money.js";
-import { formatLongDateFr, formatNumericDateFr, todayIso } from "../../utils/dates.js";
+import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
+import { displayDateFr, formatNumericDateFr, todayIso } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
 import { createSubmitGuard } from "../../utils/submit-guard.js";
 import {
@@ -23,7 +25,6 @@ import {
   emptyStateHtml,
   errorStateHtml,
   fundName,
-  fundSelectHtml,
   pageHeaderHtml,
   setFieldError,
   skeletonHtml,
@@ -40,9 +41,10 @@ export function renderChurchReconciliation(root, ctx = {}) {
     <section class="page church-page" aria-labelledby="church-title">
       ${pageHeaderHtml({
         kicker: "Église",
-        title: "Rapprochement",
-        subtitle: "Comparer le solde théorique et l'argent compté.",
+        title: "Vérifier la caisse",
+        subtitle: "Comparer l'argent enregistré avec l'argent réellement présent.",
         backHref: ROUTES.church,
+        backLabel: "Retour à Église",
       })}
       <div data-role="body">${skeletonHtml(4)}</div>
     </section>
@@ -80,19 +82,21 @@ function reconciliationHtml({ funds, balances }) {
     </article>
 
     <form class="church-form stack" data-role="form" novalidate>
-      <div class="field">
-        <label class="field-label" for="recon-fund">Caisse</label>
-        <select id="recon-fund" name="fundId" class="field-input">
-          <option value="${ALL_FUNDS}" selected>Toutes les caisses</option>
-          ${fundSelectHtml(funds, "")}
-        </select>
-      </div>
+      ${
+        funds.length > 1
+          ? choiceFieldHtml({
+              id: "recon-fund",
+              name: "fundId",
+              label: "Caisse",
+              options: [{ id: ALL_FUNDS, name: "Toutes les caisses" }, ...funds],
+              selectedId: ALL_FUNDS,
+              labelFn: (row) => row.name || fundName(row),
+            })
+          : `<input type="hidden" name="fundId" value="${funds[0]?.id || ALL_FUNDS}" />
+             ${funds[0] ? `<div class="field"><p class="field-label">Caisse</p><p class="readonly-value">${escapeHtml(fundName(funds[0]))}</p></div>` : ""}`
+      }
 
-      <div class="field">
-        <label class="field-label" for="recon-date">Date du rapprochement</label>
-        <input id="recon-date" name="date" class="field-input" type="date" value="${todayIso()}" required />
-        <p class="field-error" data-error="date" hidden></p>
-      </div>
+      ${dateFieldHtml({ id: "recon-date", name: "date", label: "Date de la vérification", value: todayIso() })}
 
       <div class="field">
         <label class="field-label" for="recon-actual">Argent compté</label>
@@ -118,12 +122,12 @@ function reconciliationHtml({ funds, balances }) {
       <p class="form-alert" data-role="form-error" hidden></p>
 
       <button type="submit" class="btn btn-primary btn-block" data-role="submit">
-        Vérifier et enregistrer
+        Vérifier
       </button>
     </form>
 
     <section class="recon-history-block">
-      <h2 class="section-title">Rapprochements précédents</h2>
+      <h2 class="section-title">Vérifications précédentes</h2>
       <div data-role="history">${skeletonHtml(2)}</div>
     </section>
   `;
@@ -135,6 +139,8 @@ function bindReconciliation(body, ctx) {
   if (!form || !(actualInput instanceof HTMLInputElement)) return;
 
   bindMoneyInput(actualInput);
+  bindChoiceFields(form);
+  bindDateFields(form);
   const guard = createSubmitGuard();
   const preview = body.querySelector('[data-role="preview"]');
 
@@ -235,17 +241,18 @@ async function handleReconSubmit(form, ctx, body) {
 
     const result = await confirmAndWrite(
       {
-        title: "CONFIRMER LE RAPPROCHEMENT",
+        title: "Confirmer la vérification",
         amountHtml: amountHtml(actual),
         extraHtml: resultHtml({ theoretical, actual, difference }),
         rows: [
           { label: "Caisse", value: fundName(fund) },
-          { label: "Date", value: formatLongDateFr(date) },
+          { label: "Date", value: displayDateFr(date) },
           { label: "Théorique", value: formatFcfa(theoretical) },
           { label: "Écart", value: formatFcfa(difference) },
           ...(note ? [{ label: "Note", value: note }] : []),
         ],
-        confirmLabel: "Confirmer et enregistrer",
+        confirmLabel: "Confirmer",
+        cancelLabel: "Modifier",
         cancelLabel: "Modifier",
       },
       async () =>
@@ -293,28 +300,28 @@ function resultHtml({ theoretical, actual, difference, saved = false }) {
   if (classified.status === "balanced") {
     banner = `
       <p class="recon-banner recon-banner-ok">
-        <span aria-hidden="true">✓</span> CAISSE ÉQUILIBRÉE
+        ✓ Caisse correcte
       </p>
       <p>0 FCFA d'écart</p>
     `;
   } else if (classified.status === "shortage") {
     banner = `
       <p class="recon-banner recon-banner-warn">
-        <span aria-hidden="true">⚠</span> ARGENT MANQUANT
+        ⚠ Argent manquant
       </p>
       <p>${escapeHtml(formatFcfa(classified.absoluteDifference))}</p>
     `;
   } else {
     banner = `
       <p class="recon-banner recon-banner-info">
-        <span aria-hidden="true">↑</span> EXCÉDENT
+        ↑ Argent en plus
       </p>
       <p>${escapeHtml(formatFcfa(classified.absoluteDifference))}</p>
     `;
   }
 
   return `
-    ${saved ? `<p class="success-inline">✓ Rapprochement enregistré</p>` : ""}
+    ${saved ? `<p class="success-inline">Vérification enregistrée</p>` : ""}
     ${banner}
     <p class="field-hint">Théorique : ${escapeHtml(formatFcfa(theoretical))} · Compté : ${escapeHtml(formatFcfa(actual))}</p>
   `;
@@ -332,10 +339,10 @@ async function renderHistory(container, fundValue) {
 
     if (!rows.length) {
       container.innerHTML = emptyStateHtml({
-        title: "Aucun rapprochement enregistré.",
+        title: "Aucune vérification enregistrée.",
         body: "Le premier contrôle de caisse apparaîtra ici.",
         actionHref: CHURCH_LINKS.reconciliation,
-        actionLabel: "Faire un rapprochement",
+        actionLabel: "Vérifier la caisse",
       });
       return;
     }
@@ -357,7 +364,7 @@ function reconCardHtml(row, previous) {
   const fundLabel = row.fund_id ? fundName(row.church_funds) : "Toutes les caisses";
   let previousNote = "";
   if (previous) {
-    previousNote = `<p class="field-hint">Rapprochement précédent : ${escapeHtml(formatNumericDateFr(previous.reconciled_at))} · écart ${escapeHtml(formatFcfa(previous.difference_fcfa))}. L'écart actuel a pu apparaître après cette date — sans cause précise connue.</p>`;
+    previousNote = `<p class="field-hint">Vérification précédente : ${escapeHtml(formatNumericDateFr(previous.reconciled_at))} · écart ${escapeHtml(formatFcfa(previous.difference_fcfa))}. L'écart actuel a pu apparaître après cette date — sans cause précise connue.</p>`;
   }
 
   return `
@@ -375,9 +382,9 @@ function reconCardHtml(row, previous) {
 }
 
 function statusLabel(status) {
-  if (status === "balanced") return "✓ Caisse équilibrée";
+  if (status === "balanced") return "✓ Caisse correcte";
   if (status === "shortage") return "⚠ Argent manquant";
-  return "↑ Excédent";
+  return "↑ Argent en plus";
 }
 
 function localNoonIso(dateIso) {
