@@ -4,23 +4,24 @@ import { showToast } from "../../utils/toast.js";
 import {
   DEFAULT_NOTIFICATION_SETTINGS,
   buildTargetPlatform,
-  disablePushDeviceToken,
   fetchEnabledPushDevice,
   fetchNotificationPreferences,
   mapNotificationTestError,
   sendNotificationTest,
   upsertNotificationPreferences,
-  upsertPushDevice,
+  upsertWebPushDevice,
 } from "../../services/supabase/notifications.js";
 import {
-  ensureForegroundListener,
-  ensureRegistrationChangeListener,
-  isFirebaseMessagingConfigured,
-  registerFcmInstallation,
-} from "../../push/firebase-messaging.js";
-import { showForegroundNotification } from "../../push/foreground-notification.js";
+  detectWebPushSupport,
+  getLocalPushSubscription,
+  isRappelsWebPushEnabled,
+  isWebPushConfigured,
+  serializePushSubscription,
+  subscribeStandardWebPush,
+} from "../../push/web-push.js";
 import { ensureServiceWorkerRegistration } from "../../pwa.js";
 import { rappelsViewState } from "../../../supabase/functions/_shared/fcm-auth.js";
+import { isCompletePushSubscription } from "../../../supabase/functions/_shared/web-push.js";
 
 let current = { ...DEFAULT_NOTIFICATION_SETTINGS };
 let viewState = "disabled";
@@ -121,7 +122,7 @@ function renderView() {
     return;
   }
 
-  const firebaseOk = isFirebaseMessagingConfigured();
+  const webPushOk = isWebPushConfigured();
   rootRef.innerHTML = `
     <section class="page more-page more-rappels" aria-labelledby="rappels-title">
         ${pageHeaderHtml({
@@ -154,10 +155,10 @@ function renderView() {
           </label>
         </div>
         <div class="rappels-test-wrap">
-          <button type="button" class="btn btn-secondary btn-block" data-action="test" ${firebaseOk ? "" : "disabled"}>
+          <button type="button" class="btn btn-secondary btn-block" data-action="test" ${webPushOk ? "" : "disabled"}>
             Envoyer une notification test
           </button>
-          ${!firebaseOk ? `<p class="field-hint">Le test n’est pas disponible pour le moment.</p>` : ""}
+          ${!webPushOk ? `<p class="field-hint">Le test n’est pas disponible pour le moment.</p>` : ""}
         </div>
       </article>
     </section>
@@ -169,32 +170,47 @@ function renderView() {
   rootRef.querySelector('[data-action="test"]')?.addEventListener("click", onTestClick);
 }
 
-async function persistRegistration(fid) {
-  await upsertPushDevice({ platform: buildTargetPlatform(), fcmToken: fid, enabled: true });
+async function persistWebPushSubscription(subscription) {
+  await upsertWebPushDevice({
+    platform: buildTargetPlatform(),
+    subscription,
+    enabled: true,
+  });
 }
 
-function startMessagingListeners() {
-  if (!isFirebaseMessagingConfigured()) return;
-  ensureForegroundListener({
-    onMessageData: (msg) => showForegroundNotification({ title: msg.title, body: msg.body, url: msg.url }),
+async function resolveLocalWebPushEnabled() {
+  if (currentPermission() !== "granted") return false;
+  if (!detectWebPushSupport().supported) return false;
+
+  let registration = null;
+  try {
+    registration = await navigator.serviceWorker.getRegistration();
+  } catch {
+    registration = null;
+  }
+  const localSub = await getLocalPushSubscription(registration);
+  const serialized = serializePushSubscription(localSub);
+  if (!isCompletePushSubscription(serialized)) return false;
+
+  const remote = await fetchEnabledPushDevice({
+    endpoint: serialized.endpoint,
+    provider: "webpush",
   });
-  ensureRegistrationChangeListener({
-    onFid: (fid) => {
-      persistRegistration(fid).catch((err) => showToast(friendlyError(err)));
-    },
-    onUnregisteredFid: (fid) => {
-      disablePushDeviceToken({ fcmToken: fid }).catch(() => {});
-    },
+  return isRappelsWebPushEnabled({
+    permission: currentPermission(),
+    localSubscription: serialized,
+    remoteDevice: remote,
   });
 }
 
 async function onActivateClick() {
   try {
-    if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+    const support = detectWebPushSupport();
+    if (!support.supported) {
       showToast("Rappels indisponibles sur cet appareil.");
       return;
     }
-    if (!isFirebaseMessagingConfigured()) {
+    if (!isWebPushConfigured()) {
       showToast("Rappels indisponibles : configuration de notifications manquante.");
       return;
     }
@@ -209,13 +225,14 @@ async function onActivateClick() {
 
     const registration = await ensureServiceWorkerRegistration();
     await navigator.serviceWorker.ready;
-    const fid = await registerFcmInstallation({ serviceWorkerRegistration: registration });
-    if (!fid) throw new Error("Impossible d'obtenir un code de notification pour cet appareil.");
+    const subscription = await subscribeStandardWebPush({ serviceWorkerRegistration: registration });
+    if (!isCompletePushSubscription(serializePushSubscription(subscription))) {
+      throw new Error("Impossible d'obtenir un code de notification pour cet appareil.");
+    }
 
-    await persistRegistration(fid);
+    await persistWebPushSubscription(subscription);
     current = await upsertNotificationPreferences({ ...current, enabled: true });
     hasEnabledDevice = true;
-    startMessagingListeners();
     showToast("✓ Rappels activés");
     renderView();
   } catch (err) {
@@ -277,10 +294,10 @@ export function renderMoreRappels(root) {
     </section>
   `;
 
-  Promise.all([fetchNotificationPreferences(), fetchEnabledPushDevice()])
-    .then(([prefs, device]) => {
+  Promise.all([fetchNotificationPreferences(), resolveLocalWebPushEnabled()])
+    .then(([prefs, synced]) => {
       current = prefs;
-      hasEnabledDevice = Boolean(device.present && device.enabled);
+      hasEnabledDevice = Boolean(synced);
     })
     .catch((err) => {
       showToast(friendlyError(err));
@@ -289,7 +306,6 @@ export function renderMoreRappels(root) {
     })
     .finally(() => {
       syncViewState();
-      if (viewState === "activated") startMessagingListeners();
       renderView();
     });
 }

@@ -15,7 +15,8 @@
     "verify:church": "node --env-file=.env scripts/verify-church-flow.mjs",
     "verify:business": "node --env-file=.env scripts/verify-business-flow.mjs",
     "verify:excel": "node scripts/verify-excel.mjs",
-    "verify:phase5": "node --env-file=.env scripts/verify-phase5.mjs"
+    "verify:phase5": "node --env-file=.env scripts/verify-phase5.mjs",
+    "generate:vapid": "node scripts/generate-vapid-keys.mjs"
   },
   "dependencies": {
     "@phosphor-icons/web": "^2.1.2",

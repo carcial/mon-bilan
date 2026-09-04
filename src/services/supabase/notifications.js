@@ -1,4 +1,10 @@
 import { config } from "../../config.js";
+import {
+  PUSH_PROVIDERS,
+  buildWebPushDeviceUpsertPayload,
+  isCompletePushSubscription,
+  serializePushSubscription,
+} from "../../../supabase/functions/_shared/web-push.js";
 import { getSupabase, getSupabaseOrThrow } from "./client.js";
 
 const PREF_PROFILE_KEY = "default";
@@ -49,18 +55,69 @@ export async function upsertNotificationPreferences(next) {
   return getNotificationSettingsFromRow(data);
 }
 
-export async function upsertPushDevice({ platform, fcmToken, enabled = true }) {
+export async function upsertPushDevice({
+  platform,
+  fcmToken,
+  enabled = true,
+  provider,
+  endpoint,
+  p256dh,
+  auth,
+}) {
   const sb = getSupabaseOrThrow();
-  const payload = buildPushDeviceUpsertPayload({ platform, fcmToken, enabled });
+  const payload = buildPushDeviceUpsertPayload({
+    platform,
+    fcmToken,
+    enabled,
+    provider,
+    endpoint,
+    p256dh,
+    auth,
+  });
+  const onConflict = payload.provider === PUSH_PROVIDERS.webpush ? "endpoint" : "fcm_token";
 
-  const { error } = await sb.from("push_devices").upsert(payload, { onConflict: "platform" });
+  const { error } = await sb.from("push_devices").upsert(payload, { onConflict });
   if (error) throw error;
   return payload;
 }
 
-export function buildPushDeviceUpsertPayload({ platform, fcmToken, enabled = true, lastSeenAtIso }) {
+export async function upsertWebPushDevice({ platform, subscription, enabled = true }) {
+  const serialized = serializePushSubscription(subscription);
+  return upsertPushDevice({
+    platform,
+    provider: PUSH_PROVIDERS.webpush,
+    endpoint: serialized.endpoint,
+    p256dh: serialized.p256dh,
+    auth: serialized.auth,
+    enabled,
+  });
+}
+
+export function buildPushDeviceUpsertPayload({
+  platform,
+  fcmToken,
+  enabled = true,
+  lastSeenAtIso,
+  provider,
+  endpoint,
+  p256dh,
+  auth,
+}) {
+  const resolvedProvider =
+    provider || (endpoint ? PUSH_PROVIDERS.webpush : PUSH_PROVIDERS.firebase);
+  if (resolvedProvider === PUSH_PROVIDERS.webpush) {
+    return buildWebPushDeviceUpsertPayload({
+      platform,
+      endpoint,
+      p256dh,
+      auth,
+      enabled,
+      lastSeenAtIso,
+    });
+  }
   return {
     platform: String(platform || "web"),
+    provider: PUSH_PROVIDERS.firebase,
     fcm_token: String(fcmToken),
     enabled: Boolean(enabled),
     last_seen_at: lastSeenAtIso || new Date().toISOString(),
@@ -115,7 +172,7 @@ export function mapNotificationTestError(error) {
   if (code === "not_registered" || /pas encore enregistré/i.test(message)) {
     return "Les rappels sont autorisés, mais cet appareil n'est pas encore enregistré.";
   }
-  if (code === "fcm_failed" || /n'a pas pu être envoyée/i.test(message)) {
+  if (code === "fcm_failed" || code === "webpush_failed" || /n'a pas pu être envoyée/i.test(message)) {
     return "La notification n'a pas pu être envoyée. Réessayez.";
   }
   if (code === "config_incomplete" || /pas encore complètement configurés/i.test(message)) {
@@ -132,22 +189,38 @@ export function mapNotificationTestError(error) {
   return message && /[àâäéèêëïîôùûüç]/i.test(message) ? message : "La notification n'a pas pu être envoyée. Réessayez.";
 }
 
-export async function fetchEnabledPushDevice() {
+export async function fetchEnabledPushDevice({ endpoint, provider } = {}) {
   const sb = getSupabase();
-  if (!sb) return { present: false, enabled: false, platform: null, lastSeenAt: null };
+  if (!sb) {
+    return { present: false, enabled: false, platform: null, provider: null, endpoint: null, lastSeenAt: null };
+  }
 
-  const { data, error } = await sb
+  let query = sb
     .from("push_devices")
-    .select("platform, enabled, last_seen_at")
-    .eq("enabled", true)
-    .eq("platform", "web")
-    .maybeSingle();
+    .select("platform, provider, endpoint, p256dh, auth, enabled, last_seen_at")
+    .eq("enabled", true);
 
+  if (provider) query = query.eq("provider", provider);
+  if (endpoint) query = query.eq("endpoint", endpoint);
+  else if (!provider) query = query.eq("provider", PUSH_PROVIDERS.webpush);
+
+  const { data, error } = await query.limit(1).maybeSingle();
   if (error) throw error;
+
+  const serialized = {
+    endpoint: data?.endpoint || "",
+    p256dh: data?.p256dh || "",
+    auth: data?.auth || "",
+  };
+  const isWebPush = data?.provider === PUSH_PROVIDERS.webpush;
+  const present = Boolean(data) && (!isWebPush || isCompletePushSubscription(serialized));
+
   return {
-    present: Boolean(data),
-    enabled: Boolean(data?.enabled),
+    present,
+    enabled: Boolean(data?.enabled) && present,
     platform: data?.platform || null,
+    provider: data?.provider || null,
+    endpoint: data?.endpoint || null,
     lastSeenAt: data?.last_seen_at || null,
   };
 }

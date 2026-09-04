@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildPushPayload } from "npm:@block65/webcrypto-web-push@2.0.0";
 import {
   DEFAULT_TIMEZONE,
   DEFAULT_WITHDRAWAL_ANCHOR_DATE_ISO,
@@ -24,6 +25,15 @@ import {
   isDiagnosticPushType,
   normalizeServiceAccountPrivateKey,
 } from "../_shared/fcm-auth.js";
+import {
+  PUSH_PROVIDERS,
+  buildWebPushMessagePayload,
+  endpointsToDisableFromResults,
+  isStalePushStatus,
+  missingWebPushServerEnvNames,
+  normalizeWebPushSubject,
+  selectDevicesForSend,
+} from "../_shared/web-push.js";
 
 function corsHeaders(req: Request) {
   return buildEdgeCorsHeaders(req.headers.get("Origin") || "*");
@@ -130,6 +140,53 @@ async function getFirebaseAccessToken() {
   return String(json.access_token);
 }
 
+function readWebPushVapidConfig() {
+  const publicKey = String(Deno.env.get("WEB_PUSH_PUBLIC_KEY") || "").trim();
+  const privateKey = String(Deno.env.get("WEB_PUSH_PRIVATE_KEY") || "").trim();
+  const subject = normalizeWebPushSubject(Deno.env.get("WEB_PUSH_SUBJECT") || "");
+  const missing = missingWebPushServerEnvNames({
+    WEB_PUSH_PUBLIC_KEY: publicKey,
+    WEB_PUSH_PRIVATE_KEY: privateKey,
+    WEB_PUSH_SUBJECT: subject,
+  });
+  if (missing.length) return null;
+  return { publicKey, privateKey, subject };
+}
+
+async function sendWebPushToSubscription({
+  vapid,
+  device,
+  payload,
+}: {
+  vapid: { publicKey: string; privateKey: string; subject: string };
+  device: { endpoint: string; p256dh: string; auth: string };
+  payload: Record<string, string>;
+}) {
+  const subscription = {
+    endpoint: device.endpoint,
+    expirationTime: null,
+    keys: { p256dh: device.p256dh, auth: device.auth },
+  };
+  const request = await buildPushPayload(
+    {
+      data: JSON.stringify(payload),
+      options: { ttl: 60 * 60, urgency: "high" },
+    },
+    subscription,
+    vapid,
+  );
+  const res = await fetch(subscription.endpoint, request);
+  if (res.ok || res.status === 201) {
+    return { ok: true, status: res.status, endpoint: device.endpoint, stale: false };
+  }
+  return {
+    ok: false,
+    status: res.status,
+    endpoint: device.endpoint,
+    stale: isStalePushStatus(res.status),
+  };
+}
+
 async function sendFcmDataMessage({
   accessToken,
   projectId,
@@ -203,8 +260,8 @@ serve(async (req) => {
     auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
   });
 
-  const firebaseProjectId = getEnv("FIREBASE_PROJECT_ID");
   const appBaseUrl = String(Deno.env.get("APP_BASE_URL") || "").replace(/\/+$/, "");
+  const vapid = readWebPushVapidConfig();
 
   if (requestType !== "test") {
     const cutoff = new Date(Date.now() - 1000 * 60 * 60 * 24 * 90).toISOString();
@@ -231,10 +288,11 @@ serve(async (req) => {
 
   const devicesRes = await supabase
     .from("push_devices")
-    .select("fcm_token, platform, enabled")
+    .select("fcm_token, platform, enabled, provider, endpoint, p256dh, auth")
     .eq("enabled", true);
   if (devicesRes.error) throw new Error(`devices fetch error: ${devicesRes.error.message}`);
-  const devices = devicesRes.data ?? [];
+  const plan = selectDevicesForSend(devicesRes.data ?? []);
+  const devices = plan.devices;
   if (!devices.length) {
     const noDevice = isDiagnosticPushType(requestType);
     return json(req, {
@@ -248,9 +306,27 @@ serve(async (req) => {
   const now = new Date();
   const localDateISO = getLocalDateISO(now, timezone);
   const within19 = isAroundLocalHour(now, 19, 1, timezone);
+  const needsDelivery = isDiagnosticPushType(requestType) || within19;
 
-  const accessToken =
-    isDiagnosticPushType(requestType) || within19 ? await getFirebaseAccessToken() : "";
+  if (plan.preferredProvider === PUSH_PROVIDERS.webpush && !vapid) {
+    return json(
+      req,
+      {
+        ok: false,
+        sent: 0,
+        code: "config_incomplete",
+        error: "Les rappels ne sont pas encore complètement configurés.",
+      },
+      500,
+    );
+  }
+
+  let firebaseProjectId = "";
+  let accessToken = "";
+  if (plan.preferredProvider === PUSH_PROVIDERS.firebase && needsDelivery) {
+    firebaseProjectId = getEnv("FIREBASE_PROJECT_ID");
+    accessToken = await getFirebaseAccessToken();
+  }
   let sentCount = 0;
 
   async function insertDedupLog({
@@ -334,24 +410,45 @@ serve(async (req) => {
 
     let anySuccess = false;
     const invalidTokens: string[] = [];
+    const sendResults: Array<{ endpoint?: string; stale?: boolean; status?: number }> = [];
 
     for (const d of devices) {
-      const token = d.fcm_token;
-      const res = await sendFcmDataMessage({
-        accessToken,
-        projectId: firebaseProjectId,
-        fcmToken: token,
-        title,
-        body,
-        targetUrl,
-        reminderType,
-        dedupKeyValue: dedup,
-      });
+      if (plan.preferredProvider === PUSH_PROVIDERS.webpush && vapid) {
+        const res = await sendWebPushToSubscription({
+          vapid,
+          device: d as { endpoint: string; p256dh: string; auth: string },
+          payload: buildWebPushMessagePayload({
+            title,
+            body,
+            targetUrl,
+            reminderType,
+            dedupKeyValue: dedup,
+          }),
+        });
+        sendResults.push(res);
+        if (res.ok) anySuccess = true;
+      } else {
+        const token = d.fcm_token;
+        const res = await sendFcmDataMessage({
+          accessToken,
+          projectId: firebaseProjectId,
+          fcmToken: token,
+          title,
+          body,
+          targetUrl,
+          reminderType,
+          dedupKeyValue: dedup,
+        });
 
-      if (res.ok) anySuccess = true;
-      else if (isFcmInvalidTokenStatus(res.status)) invalidTokens.push(token);
+        if (res.ok) anySuccess = true;
+        else if (isFcmInvalidTokenStatus(res.status)) invalidTokens.push(token);
+      }
     }
 
+    const staleEndpoints = endpointsToDisableFromResults(sendResults);
+    if (staleEndpoints.length) {
+      await supabase.from("push_devices").update({ enabled: false }).in("endpoint", staleEndpoints);
+    }
     if (invalidTokens.length) {
       await supabase.from("push_devices").update({ enabled: false }).in("fcm_token", invalidTokens);
     }
@@ -360,7 +457,13 @@ serve(async (req) => {
       await markLogStatus(logId, "sent");
       sentCount += 1;
     } else {
-      await markLogStatus(logId, "failed", "FCM send failed (all tokens invalid or unreachable)");
+      await markLogStatus(
+        logId,
+        "failed",
+        plan.preferredProvider === PUSH_PROVIDERS.webpush
+          ? "Web Push send failed (all subscriptions stale or unreachable)"
+          : "FCM send failed (all tokens invalid or unreachable)",
+      );
     }
   }
 
@@ -390,28 +493,50 @@ serve(async (req) => {
 
     let anySuccess = false;
     const invalidTokens: string[] = [];
+    const sendResults: Array<{ endpoint?: string; stale?: boolean; status?: number }> = [];
     let lastFailure = "";
 
     for (const d of devices) {
-      const token = d.fcm_token;
-      const res = await sendFcmDataMessage({
-        accessToken,
-        projectId: firebaseProjectId,
-        fcmToken: token,
-        title: copy.title,
-        body: copy.body,
-        targetUrl,
-        reminderType: copy.reminderType,
-        dedupKeyValue,
-      });
+      if (plan.preferredProvider === PUSH_PROVIDERS.webpush && vapid) {
+        const res = await sendWebPushToSubscription({
+          vapid,
+          device: d as { endpoint: string; p256dh: string; auth: string },
+          payload: buildWebPushMessagePayload({
+            title: copy.title,
+            body: copy.body,
+            targetUrl,
+            reminderType: copy.reminderType,
+            dedupKeyValue,
+          }),
+        });
+        sendResults.push(res);
+        if (res.ok) anySuccess = true;
+        else lastFailure = String(res.status || "webpush_failed");
+      } else {
+        const token = d.fcm_token;
+        const res = await sendFcmDataMessage({
+          accessToken,
+          projectId: firebaseProjectId,
+          fcmToken: token,
+          title: copy.title,
+          body: copy.body,
+          targetUrl,
+          reminderType: copy.reminderType,
+          dedupKeyValue,
+        });
 
-      if (res.ok) anySuccess = true;
-      else {
-        lastFailure = res.status || "fcm_failed";
-        if (isFcmInvalidTokenStatus(res.status)) invalidTokens.push(token);
+        if (res.ok) anySuccess = true;
+        else {
+          lastFailure = res.status || "fcm_failed";
+          if (isFcmInvalidTokenStatus(res.status)) invalidTokens.push(token);
+        }
       }
     }
 
+    const staleEndpoints = endpointsToDisableFromResults(sendResults);
+    if (staleEndpoints.length) {
+      await supabase.from("push_devices").update({ enabled: false }).in("endpoint", staleEndpoints);
+    }
     if (invalidTokens.length) {
       await supabase.from("push_devices").update({ enabled: false }).in("fcm_token", invalidTokens);
     }
@@ -421,10 +546,11 @@ serve(async (req) => {
     }
 
     if (!anySuccess) {
+      const failedCode = plan.preferredProvider === PUSH_PROVIDERS.webpush ? "webpush_failed" : "fcm_failed";
       return json(req, {
         ok: false,
         sent: 0,
-        code: "fcm_failed",
+        code: failedCode,
         error: "La notification n'a pas pu être envoyée. Réessayez.",
         fcm_status: lastFailure || undefined,
       });
@@ -498,7 +624,8 @@ serve(async (req) => {
     const lower = message.toLowerCase();
     const configIncomplete =
       lower.includes("missing env var") ||
-      lower.includes("firebase") && (lower.includes("private") || lower.includes("client") || lower.includes("project"));
+      lower.includes("web_push") ||
+      (lower.includes("firebase") && (lower.includes("private") || lower.includes("client") || lower.includes("project")));
     return json(
       req,
       {

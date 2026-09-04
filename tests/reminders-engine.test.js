@@ -288,6 +288,7 @@ describe("token upsert payload", () => {
     });
     expect(payload).toEqual({
       platform: "web",
+      provider: "firebase",
       fcm_token: "tok_123",
       enabled: true,
       last_seen_at: "2026-01-01T10:00:00.000Z",
@@ -318,6 +319,9 @@ describe("notification test error mapping", () => {
       "Les rappels sont autorisés, mais cet appareil n'est pas encore enregistré.",
     );
     expect(mapNotificationTestError({ code: "fcm_failed", message: "x" })).toBe(
+      "La notification n'a pas pu être envoyée. Réessayez.",
+    );
+    expect(mapNotificationTestError({ code: "webpush_failed", message: "x" })).toBe(
       "La notification n'a pas pu être envoyée. Réessayez.",
     );
     expect(mapNotificationTestError({ code: "config_incomplete", message: "x" })).toBe(

@@ -4,6 +4,7 @@
   "description": "Gestion personnelle Église et Commerce — sans compte ni mot de passe",
   "lang": "fr",
   "dir": "ltr",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

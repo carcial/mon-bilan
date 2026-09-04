@@ -1,11 +1,12 @@
 /* Mon Bilan service worker
  * - Cache app shell and static assets only, never Supabase data
- * - Background push reminders via Firebase Messaging (same worker, same scope)
+ * - Standard Web Push (Push API) is the primary notification transport
+ * - Firebase Messaging remains temporarily for fallback comparison
  *
  * Firebase public web config is injected at build/dev time.
- * Never put service-account keys here.
+ * Never put service-account keys or VAPID private keys here.
  */
-const CACHE_VERSION = "mon-bilan-shell-v4";
+const CACHE_VERSION = "mon-bilan-shell-v5";
 const SHELL_ASSETS = [
   "/",
   "/index.html",
@@ -113,39 +114,97 @@ if (hasFirebase) {
     importScripts("https://www.gstatic.com/firebasejs/12.18.0/firebase-messaging-compat.js");
     const app = firebase.initializeApp(firebaseConfig);
     const messaging = firebase.messaging(app);
-    messaging.onBackgroundMessage((payload) => {
-      const data = (payload && payload.data) || {};
-      const title = data.title || "Rappel";
-      const body = data.body || "";
-      const url = data.url;
-      const tag = data.dedup_key || "push";
-      self.registration.showNotification(title, {
-        body,
-        tag,
-        data: { url },
-      });
+    messaging.onBackgroundMessage(() => {
+      // Display is handled by the standard `push` listener below so Safari
+      // always gets a visible notification and we do not double-show FCM + Web Push.
     });
   } catch (_err) {
     /* keep caching working even if messaging scripts fail */
   }
 }
 
+function parsePushEventPayload(event) {
+  let raw = {};
+  try {
+    const data = event && event.data;
+    if (data && typeof data.json === "function") raw = data.json() || {};
+    else if (data && typeof data.text === "function") raw = JSON.parse(data.text() || "{}");
+  } catch (_err) {
+    raw = {};
+  }
+  const nested = raw.data && typeof raw.data === "object" ? raw.data : {};
+  const notification = raw.notification && typeof raw.notification === "object" ? raw.notification : {};
+  return {
+    title: String(nested.title || raw.title || notification.title || "Mon Bilan"),
+    body: String(nested.body || raw.body || notification.body || ""),
+    url: String(nested.url || raw.url || nested.targetUrl || raw.targetUrl || "#/"),
+    tag: String(nested.tag || raw.tag || nested.dedup_key || raw.dedup_key || "mon-bilan-push"),
+    reminderType: String(nested.reminder_type || raw.reminder_type || nested.reminderType || ""),
+    provider: String(nested.provider || raw.provider || "webpush"),
+  };
+}
+
+function resolveNotificationClickUrl(url, origin) {
+  const base = String(origin || "").replace(/\/+$/, "");
+  const raw = String(url || "").trim();
+  if (!raw || raw === "/" || raw === "#/" || raw === "#") return `${base}/#/`;
+  if (raw.startsWith("#")) return `${base}/${raw}`;
+  if (raw.startsWith("/") && !raw.startsWith("//")) {
+    const hash = raw.startsWith("/#") ? raw.slice(1) : `#${raw}`;
+    return `${base}/${hash}`;
+  }
+  try {
+    return new URL(raw, base).href;
+  } catch (_err) {
+    return `${base}/#/`;
+  }
+}
+
+self.addEventListener("push", (event) => {
+  event.waitUntil(
+    (async () => {
+      const parsed = parsePushEventPayload(event);
+      await self.registration.showNotification(parsed.title, {
+        body: parsed.body,
+        icon: "/icons/icon-192.png",
+        badge: "/icons/icon-192.png",
+        tag: parsed.tag,
+        renotify: true,
+        data: {
+          url: parsed.url,
+          reminderType: parsed.reminderType,
+          provider: parsed.provider,
+        },
+      });
+      const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const client of clients) {
+        client.postMessage({
+          type: "PUSH_NOTIFICATION_RECEIVED",
+          title: parsed.title,
+          body: parsed.body,
+          url: parsed.url,
+        });
+      }
+    })(),
+  );
+});
+
 self.addEventListener("notificationclick", (event) => {
-  const url = event.notification && event.notification.data && event.notification.data.url;
+  const data = (event.notification && event.notification.data) || {};
   event.notification.close();
-  if (!url) return;
+  const origin = self.location.origin;
+  const targetUrl = resolveNotificationClickUrl(data.url, origin);
 
   event.waitUntil(
     (async () => {
       const allClients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-      const origin = self.location.origin;
       const sameOriginClient = allClients.find((c) => c.url && c.url.startsWith(origin));
       if (sameOriginClient) {
-        sameOriginClient.postMessage({ type: "PUSH_NOTIFICATION_CLICK", url });
-        sameOriginClient.focus();
+        sameOriginClient.postMessage({ type: "PUSH_NOTIFICATION_CLICK", url: targetUrl });
+        await sameOriginClient.focus();
         return;
       }
-      await self.clients.openWindow(url);
+      await self.clients.openWindow(targetUrl);
     })(),
   );
 });
