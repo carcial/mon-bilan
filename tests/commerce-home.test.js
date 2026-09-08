@@ -14,7 +14,7 @@ import {
   uniqueKnownCustomerCount,
   validateSale,
 } from "../src/utils/business-calc.js";
-import { relativeDayLabel } from "../src/utils/dates.js";
+import { relativeDayLabel, relativeTimeLabel } from "../src/utils/dates.js";
 import {
   rememberPath,
   resetBackStack,
@@ -54,8 +54,8 @@ describe("Commerce Home is a summary layer", () => {
     expect(html).toContain("Stock disponible");
     expect(html).toContain("31 sacs");
     expect(html).toContain("État actuel");
-    expect(html).toContain("Clients servis aujourd");
-    expect(html).toContain("2 clients identifiés");
+    expect(html).toContain("Clients servis");
+    expect(html).toContain("clients identifiés");
     expect(html).not.toContain("Résultat du mois");
     expect(html).not.toContain("Cash reçu");
     expect(html).not.toContain("Crédit des ventes");
@@ -74,6 +74,8 @@ describe("Commerce Home is a summary layer", () => {
   });
 
   it("keeps quick actions on existing write/payment routes", () => {
+    expect(html).toContain("Actions rapides");
+    expect(html).toContain("Accédez rapidement aux principales fonctionnalités");
     expect(html).toContain("Nouvelle vente");
     expect(html).toContain("Nouvel arrivage");
     expect(html).toContain("Paiement client");
@@ -102,6 +104,7 @@ describe("Commerce Home is a summary layer", () => {
   it("reuses existing sales rows for recent sales", () => {
     expect(html).toContain("Ventes récentes");
     expect(html).toContain("Jeanne");
+    expect(html).toContain("2 articles");
     expect(html).toContain(`href="#/commerce/vente/s1"`);
     expect(html).toContain("Voir tout");
     expect(html).toContain(`href="#${BUSINESS_LINKS.allSales}"`);
@@ -265,6 +268,7 @@ describe("relative day labels", () => {
     const copy = new Date(now.getTime());
     expect(relativeDayLabel("2026-09-08", now)).toBe("Aujourd'hui");
     expect(relativeDayLabel("2026-09-07", now)).toBe("Hier");
+    expect(relativeTimeLabel(new Date(2026, 8, 8, 11, 48, 0), now)).toBe("Il y a 12 min");
     expect(now.getTime()).toBe(copy.getTime());
   });
 });

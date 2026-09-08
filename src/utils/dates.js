@@ -149,3 +149,19 @@ export function relativeDayLabel(input, now = new Date()) {
   if (iso === toIsoDate(yesterdayDate)) return "Hier";
   return formatNumericDateFr(iso);
 }
+
+/** Compact relative clock for list rows. Falls back to the day label. */
+export function relativeTimeLabel(input, now = new Date()) {
+  const d = parseLocalDate(input);
+  if (!d) return relativeDayLabel(input, now);
+  const diffMs = now.getTime() - d.getTime();
+  if (!Number.isFinite(diffMs) || diffMs < 0) return relativeDayLabel(input, now);
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "À l'instant";
+  if (mins < 60) return `Il y a ${mins} min`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24 && todayIso(d) === todayIso(now)) {
+    return hours === 1 ? "Il y a 1 h" : `Il y a ${hours} h`;
+  }
+  return relativeDayLabel(input, now);
+}

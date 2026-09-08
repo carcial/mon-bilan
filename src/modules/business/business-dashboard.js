@@ -2,7 +2,7 @@ import { amountHtml } from "../../components/amount.js";
 import { iconHtml } from "../../components/icons.js";
 import { isSupabaseConfigured } from "../../config.js";
 import { getBusinessReport, getSales } from "../../services/supabase/business.js";
-import { greetingForNow, relativeDayLabel, todayIso } from "../../utils/dates.js";
+import { relativeTimeLabel, todayIso } from "../../utils/dates.js";
 import { friendlyError, escapeHtml } from "../../utils/errors.js";
 import { formatFcfa } from "../../utils/money.js";
 import {
@@ -24,12 +24,11 @@ import {
  * @param {{ embedded?: boolean }} [ctx]
  */
 export function renderBusinessDashboard(root, ctx = {}) {
-  const greeting = greetingForNow();
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      <header class="page-header home-greeting">
-        <p class="dash-date">${escapeHtml(greeting)}</p>
-        <h1 class="dash-title" id="business-title">Commerce</h1>
+      <header class="page-header home-greeting ops-home-header">
+        <h1 class="dash-title" id="business-title">Aujourd'hui</h1>
+        <p class="dash-date">Vue d'ensemble de votre activité</p>
       </header>
       ${
         isSupabaseConfigured()
@@ -85,7 +84,6 @@ export function commerceHomeHtml(report = {}, options = {}) {
   const salesCount = sales.length;
   const salesWord = salesCount > 1 ? "ventes" : "vente";
   const customersToday = uniqueKnownCustomerCount(sales);
-  const customersWord = customersToday > 1 ? "clients" : "client";
   const stockUnits = report.stockUnits;
   const stockPhrase = stockAvailableCompact(
     stockUnits,
@@ -98,31 +96,37 @@ export function commerceHomeHtml(report = {}, options = {}) {
       <section class="ops-metric-grid" aria-label="Indicateurs du jour">
         ${metricCard({
           href: BUSINESS_LINKS.todaySales,
+          icon: "chart-bar",
           label: "Ventes du jour",
           valueHtml: amountHtml(report.revenue || 0, { className: "amount-sm" }),
           meta: `${salesCount} ${salesWord}`,
         })}
         ${metricCard({
           href: BUSINESS_LINKS.stock,
+          icon: "package",
           label: "Stock disponible",
           valueHtml: escapeHtml(stockPhrase),
           meta: "État actuel",
         })}
         ${metricCard({
           href: BUSINESS_LINKS.todayCustomers,
-          label: "Clients servis aujourd'hui",
+          icon: "users",
+          label: "Clients servis",
           valueHtml: escapeHtml(String(customersToday)),
-          meta: `${customersToday} ${customersWord} identifié${customersToday > 1 ? "s" : ""}`,
+          meta: "clients identifiés",
         })}
       </section>
 
       <section class="section-block">
-        <h2 class="section-title">Actions</h2>
-        <div class="actions-grid">
-          ${actionTile(BUSINESS_LINKS.sale, "receipt", "Nouvelle vente")}
-          ${actionTile(BUSINESS_LINKS.arrival, "truck", "Nouvel arrivage")}
-          ${actionTile(BUSINESS_LINKS.paymentNew, "hand-coins", "Paiement client")}
-          ${actionTile(BUSINESS_LINKS.supplierPay, "credit-card", "Paiement fournisseur")}
+        <div class="ops-section-intro">
+          <h2 class="section-title">Actions rapides</h2>
+          <p class="ops-section-sub">Accédez rapidement aux principales fonctionnalités</p>
+        </div>
+        <div class="ops-actions-grid">
+          ${actionTile(BUSINESS_LINKS.sale, "shopping-cart", "Nouvelle vente")}
+          ${actionTile(BUSINESS_LINKS.arrival, "package", "Nouvel arrivage")}
+          ${actionTile(BUSINESS_LINKS.paymentNew, "users", "Paiement client")}
+          ${actionTile(BUSINESS_LINKS.supplierPay, "file-text", "Paiement fournisseur")}
         </div>
       </section>
 
@@ -163,9 +167,10 @@ export function commerceHomeHtml(report = {}, options = {}) {
   `;
 }
 
-function metricCard({ href, label, valueHtml, meta }) {
+function metricCard({ href, icon, label, valueHtml, meta }) {
   return `
     <a class="card ops-metric-card" href="#${href}">
+      <span class="ops-metric-icon">${iconHtml(icon, { weight: "bold", size: "sm" })}</span>
       <span class="ops-metric-label">${escapeHtml(label)}</span>
       <span class="ops-metric-value">${valueHtml}</span>
       <span class="ops-metric-meta">${escapeHtml(meta)}</span>
@@ -177,9 +182,14 @@ function actionTile(href, icon, label) {
   return `
     <a class="action-card action-card-home" href="#${href}">
       <span class="action-card-icon">${iconHtml(icon, { weight: "bold", size: "md" })}</span>
-      <span>${escapeHtml(label)}</span>
+      <span class="action-card-label">${escapeHtml(label)}</span>
+      <span class="action-card-go" aria-hidden="true">${iconHtml("caret-right", { weight: "bold", size: "sm" })}</span>
     </a>
   `;
+}
+
+function rowChevron() {
+  return `<span class="ops-row-chevron" aria-hidden="true">${iconHtml("caret-right", { weight: "bold", size: "sm" })}</span>`;
 }
 
 function watchRow(href, icon, label, value, meta) {
@@ -190,7 +200,10 @@ function watchRow(href, icon, label, value, meta) {
         <span class="list-row-title">${escapeHtml(label)}</span>
         <span class="list-row-meta">${escapeHtml(meta)}</span>
       </span>
-      <span class="list-row-amount ops-watch-value">${escapeHtml(value)}</span>
+      <span class="ops-row-end">
+        <span class="list-row-amount ops-watch-value">${escapeHtml(value)}</span>
+        ${rowChevron()}
+      </span>
     </a>
   `;
 }
@@ -201,17 +214,19 @@ function recentSaleRow(sale) {
     0,
   );
   const name = sale.customers?.name || (sale.customer_id ? "Client" : "Vente");
-  const qtyLabel = qty > 0 ? `${qty}` : "";
+  const qtyLabel = qty > 0 ? `${qty} article${qty > 1 ? "s" : ""}` : "";
+  const when = relativeTimeLabel(sale.created_at || sale.sale_date);
   return `
     <a class="list-row ops-recent-row" href="#${businessSalePath(sale.id)}">
-      <span class="list-row-icon">${iconHtml("receipt", { weight: "bold" })}</span>
+      <span class="list-row-icon">${iconHtml("shopping-cart", { weight: "bold" })}</span>
       <span class="list-row-body">
         <span class="list-row-title">${escapeHtml(name)}</span>
-        <span class="list-row-meta">${escapeHtml(
-          [qtyLabel, relativeDayLabel(sale.sale_date || sale.created_at)].filter(Boolean).join(" · "),
-        )}</span>
+        <span class="list-row-meta">${escapeHtml([qtyLabel, when].filter(Boolean).join(" · "))}</span>
       </span>
-      <span class="list-row-amount">${amountHtml(saleItemsTotal(sale), { className: "amount-sm" })}</span>
+      <span class="ops-row-end">
+        <span class="list-row-amount">${amountHtml(saleItemsTotal(sale), { className: "amount-sm" })}</span>
+        ${rowChevron()}
+      </span>
     </a>
   `;
 }
