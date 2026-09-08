@@ -3,19 +3,20 @@ import { ROUTES } from "../../router.js";
 import { getArrivals, getBordereau } from "../../services/supabase/business.js";
 import { displayDateFr, formatNumericDateFr } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
-import { calculateArrivalExpenses } from "../../utils/business-calc.js";
+import { calculateArrivalExpenses, calculateLineMargin, calculateSaleTotal } from "../../utils/business-calc.js";
 import { formatFcfa } from "../../utils/money.js";
 import { supplierDisplayLabel } from "../../utils/supplier-label.js";
 import {
   BUSINESS_LINKS,
   emptyStateHtml,
   errorStateHtml,
+  marginOutcomeLabel,
   pageHeaderHtml,
   skeletonHtml,
   supplierAmountPerUnitLabel,
   unitLabel,
 } from "./business-ui.js";
-import { businessBordereauPath } from "./business-routes.js";
+import { businessBordereauPath, businessSalePath } from "./business-routes.js";
 
 export function renderBordereauList(root) {
   root.innerHTML = `
@@ -67,7 +68,7 @@ export function renderBordereauDetail(root, ctx) {
         backHref: BUSINESS_LINKS.bordereaux,
         backLabel: "Retour aux bordereaux",
       })}
-      <div data-role="body">${skeletonHtml(5)}</div>
+      <div data-role="body" class="page-body">${skeletonHtml(5)}</div>
     </section>
   `;
   loadDetail(root.querySelector('[data-role="body"]'), ctx);
@@ -80,7 +81,8 @@ async function loadDetail(body, ctx) {
       body.innerHTML = errorStateHtml("Ce bordereau est introuvable.");
       return;
     }
-    const { arrival, cost, sold, remaining, revenue, estimatedMargin, outstanding } = data;
+    const { arrival, cost, sold, remaining, revenue, estimatedMargin, supplierMerchandiseSold, outstanding, items } =
+      data;
     const unit = arrival.products?.unit_type;
     const fees =
       cost?.arrival_expenses_fcfa
@@ -91,7 +93,60 @@ async function loadDetail(body, ctx) {
       });
     const merchandise = cost?.merchandise_value_fcfa || 0;
     const totalEngaged = cost?.effective_batch_cost_fcfa ?? merchandise + fees;
+    const qtyReceived = arrival.quantity_received;
+    const outcome = marginOutcomeLabel(estimatedMargin);
     body.innerHTML = `
+      <article class="card arrival-performance">
+        <h2 class="section-title">${escapeHtml(supplierDisplayLabel(arrival.suppliers))}</h2>
+        <p class="arrival-performance-product">${escapeHtml(arrival.products?.name || "")} · ${qtyReceived} ${escapeHtml(unitLabel(unit, qtyReceived))}</p>
+        <div class="arrival-performance-grid">
+          <div>
+            <span>Vendus</span>
+            <strong>${sold}</strong>
+          </div>
+          <div>
+            <span>Restants</span>
+            <strong>${remaining}</strong>
+          </div>
+        </div>
+        <dl class="detail-list">
+          <div><dt>Ventes générées</dt><dd>${escapeHtml(formatFcfa(revenue))}</dd></div>
+          <div><dt>Montant fournisseur correspondant</dt><dd>${escapeHtml(formatFcfa(supplierMerchandiseSold || 0))}</dd></div>
+          <div>
+            <dt>Marge réalisée à ce jour</dt>
+            <dd class="margin-outcome">
+              <span class="margin-outcome-label">${escapeHtml(outcome)}</span>
+              ${amountHtml(estimatedMargin, { className: "amount-sm", signed: true })}
+            </dd>
+          </div>
+        </dl>
+      </article>
+      ${
+        items?.length
+          ? `<section class="section-block">
+        <h2 class="section-title">Ventes de ce lot</h2>
+        <div class="list-card">${items
+          .map((item) => {
+            const sale = item.sale;
+            const lineMargin = calculateLineMargin(
+              item.quantity,
+              item.sale_unit_price_fcfa,
+              arrival.supplier_unit_price_fcfa,
+            );
+            const href = sale?.id ? businessSalePath(sale.id) : BUSINESS_LINKS.history;
+            return `
+              <a class="list-row" href="#${href}">
+                <span class="list-row-body">
+                  <span class="list-row-title">${escapeHtml(sale?.customers?.name || "Client")}</span>
+                  <span class="list-row-meta">${item.quantity} · ${escapeHtml(formatNumericDateFr(sale?.sale_date))} · ${escapeHtml(marginOutcomeLabel(lineMargin))}</span>
+                </span>
+                <span class="list-row-amount">${escapeHtml(formatFcfa(calculateSaleTotal(item.quantity, item.sale_unit_price_fcfa)))}</span>
+              </a>`;
+          })
+          .join("")}</div>
+      </section>`
+          : ""
+      }
       <article class="card printable-sheet">
         <p class="report-period">BORDEREAU</p>
         <dl class="detail-list">
@@ -107,10 +162,6 @@ async function loadDetail(body, ctx) {
           <div><dt>Total engagé</dt><dd>${escapeHtml(formatFcfa(totalEngaged))}</dd></div>
           <div><dt>Avance</dt><dd>${escapeHtml(formatFcfa(arrival.advance_paid_fcfa))}</dd></div>
           <div><dt>Reste fournisseur</dt><dd>${escapeHtml(formatFcfa(outstanding))}</dd></div>
-          <div><dt>Quantité vendue</dt><dd>${sold} ${escapeHtml(unitLabel(unit, sold))}</dd></div>
-          <div><dt>Quantité restante</dt><dd>${remaining} ${escapeHtml(unitLabel(unit, remaining))}</dd></div>
-          <div><dt>Recettes de ce lot</dt><dd>${escapeHtml(formatFcfa(revenue))}</dd></div>
-          <div><dt>Marge estimée</dt><dd>${escapeHtml(formatFcfa(estimatedMargin))}</dd></div>
         </dl>
         ${arrival.note ? `<p class="tx-reason">${escapeHtml(arrival.note)}</p>` : ""}
       </article>

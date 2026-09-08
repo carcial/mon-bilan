@@ -1,7 +1,7 @@
 import { amountHtml } from "../../components/amount.js";
 import { iconHtml } from "../../components/icons.js";
 import { renderDonutChart, renderGroupedBarChart, showChartEmpty, weeklySeriesFromRows } from "../../components/charts.js";
-import { navigate, ROUTES } from "../../router.js";
+import { ROUTES } from "../../router.js";
 import { getChurchBalances, getChurchReport } from "../../services/supabase/church.js";
 import { isSupabaseConfigured } from "../../config.js";
 import { greetingForNow } from "../../utils/dates.js";
@@ -65,7 +65,6 @@ async function loadDashboard(body, ctx) {
       getChurchReport(month),
     ]);
     body.innerHTML = dashboardHtml({ funds, total, report });
-    bindDashboard(body, ctx);
     bindCharts(body, { funds, report });
   } catch (err) {
     console.warn("[church] dashboard load failed", err);
@@ -160,17 +159,6 @@ function caisseLabel(fund) {
   if (/ordinaire/i.test(name)) return "Ordinaire";
   if (/travaux|œuvre|oeuvre/i.test(name)) return "Travaux";
   return name;
-}
-
-function bindDashboard(body, ctx) {
-  body.querySelectorAll("a[href^='#']").forEach((link) => {
-    link.addEventListener("click", (event) => {
-      const href = link.getAttribute("href") || "";
-      if (!href.startsWith("#")) return;
-      event.preventDefault();
-      navigate(href.slice(1));
-    });
-  });
 }
 
 function bindCharts(body, { funds, report }) {

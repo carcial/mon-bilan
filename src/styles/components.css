@@ -89,6 +89,9 @@
   color: var(--text-primary);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 18%, transparent);
   transition: transform var(--duration-fast) var(--ease-out), border-color var(--duration-fast);
 }
 
@@ -227,6 +230,9 @@
   text-align: center;
   max-width: 100%;
   white-space: normal;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 18%, transparent);
   transition:
     transform var(--duration-fast) var(--ease-out),
     background-color var(--duration-fast) var(--ease-out),
@@ -339,6 +345,7 @@
   background: var(--accent);
   box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 28%, transparent);
   transition: transform var(--duration-normal) var(--ease-spring);
+  pointer-events: none;
 }
 
 .mode-switch[data-mode="eglise"] .mode-switch-thumb {
@@ -443,6 +450,9 @@
   font-size: 0.7rem;
   font-weight: var(--weight-medium);
   text-decoration: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .bottom-nav-item .nav-icon {
@@ -794,6 +804,10 @@ select {
   margin: 0;
 }
 
+.pay-page .section-block {
+  gap: var(--space-4);
+}
+
 .detail-entity-name {
   margin: 0;
   font-size: var(--text-xl);
@@ -1014,6 +1028,124 @@ select {
 .list-row-amount .amount-sm {
   font-size: var(--text-md);
   letter-spacing: 0;
+}
+
+.list-row.debtor-card,
+.list-row.debtor-card:not(:has(.list-row-icon)) {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-3);
+  grid-template-columns: none;
+  padding: var(--space-4);
+}
+
+.debtor-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.debtor-head .list-row-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.debtor-amount {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  text-align: right;
+  min-width: max-content;
+}
+
+.debtor-amount-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}
+
+.debtor-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  white-space: normal;
+}
+
+.debtor-kicker {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+}
+
+.stock-product-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+
+.stock-product-card:last-child {
+  border-bottom: none;
+}
+
+.stock-product-name {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+
+.stock-product-available {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.stock-product-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.stock-product-stats.is-three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.stock-product-stats span {
+  display: block;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.stock-product-stats strong {
+  display: block;
+  margin-top: 0.15rem;
+}
+
+.stock-product-lots {
+  margin-top: var(--space-1);
+}
+
+.stock-product-lots summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--accent-strong);
+  min-height: var(--touch-min);
+  display: flex;
+  align-items: center;
+}
+
+.stock-product-lots .list-card {
+  margin-top: var(--space-2);
 }
 
 .tx-card-top,

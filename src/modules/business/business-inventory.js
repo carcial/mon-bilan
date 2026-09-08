@@ -7,7 +7,7 @@ import {
   getProductInventory,
   getProducts,
 } from "../../services/supabase/business.js";
-import { sumAvailableInventory, validateAdjustment } from "../../utils/business-calc.js";
+import { validateAdjustment } from "../../utils/business-calc.js";
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { formatNumericDateFr, todayIso } from "../../utils/dates.js";
 import { supplierDisplayLabel } from "../../utils/supplier-label.js";
@@ -35,16 +35,19 @@ export function renderStock(root) {
         subtitle: "Reçu − vendu ± ajustements.",
         backHref: ROUTES.business,
       })}
-      <div class="stack" style="margin-bottom:1rem">
-        <a class="btn btn-secondary btn-block" href="#${BUSINESS_LINKS.adjustment}">Ajuster le stock</a>
+      <div class="page-body">
+        <div class="stack-sm" data-role="stock-actions">
+          <a class="btn btn-primary btn-block" href="#${BUSINESS_LINKS.arrival}">+ Enregistrer un arrivage</a>
+          <a class="btn btn-ghost btn-block" href="#${BUSINESS_LINKS.adjustment}">Ajuster le stock</a>
+        </div>
+        <div data-role="body">${skeletonHtml(3)}</div>
       </div>
-      <div data-role="body">${skeletonHtml(3)}</div>
     </section>
   `;
-  loadStock(root.querySelector('[data-role="body"]'));
+  loadStock(root.querySelector('[data-role="body"]'), root.querySelector('[data-role="stock-actions"]'));
 }
 
-async function loadStock(body) {
+async function loadStock(body, actions) {
   try {
     const [products, arrivals, inventory] = await Promise.all([
       getProductInventory(),
@@ -53,61 +56,85 @@ async function loadStock(body) {
     ]);
     const invByArrival = new Map(inventory.map((row) => [row.arrival_id, row]));
     if (!products.length && !arrivals.length) {
+      if (actions) actions.hidden = true;
       body.innerHTML = emptyStateHtml({
         title: "Aucun stock pour le moment.",
         actionHref: BUSINESS_LINKS.arrival,
-        actionLabel: "Nouvel arrivage",
+        actionLabel: "+ Enregistrer un arrivage",
       });
       return;
     }
-    const stockUnits = sumAvailableInventory(products);
+    if (actions) actions.hidden = false;
+    const lotsByProduct = new Map();
+    for (const arrival of arrivals) {
+      const productId = arrival.product_id || arrival.products?.id;
+      if (!productId) continue;
+      if (!lotsByProduct.has(productId)) lotsByProduct.set(productId, []);
+      lotsByProduct.get(productId).push(arrival);
+    }
     body.innerHTML = `
-      <div class="stack">
-      <article class="list-card">
-        <div class="today-metrics">
-          <div class="today-metric">
-            <span>Stock disponible</span>
-            <strong data-role="stock-total">${stockUnits}</strong>
-          </div>
-        </div>
-      </article>
       <div class="list-card">
-      ${products
-        .map(
-          (p) => `
-        <article class="list-row">
-          <span class="list-row-body">
-            <span class="list-row-title">${escapeHtml(p.product_name)}</span>
-            <span class="list-row-meta">Reçu ${p.quantity_received} · Vendu ${p.quantity_sold} · Ajustements ${p.quantity_adjustments}</span>
-          </span>
-          <span class="list-row-amount">${p.quantity_available} ${escapeHtml(unitLabel(p.unit_type, p.quantity_available))}</span>
-        </article>
-      `,
-        )
-        .join("")}
-      </div>
-      <h2 class="section-title">Par bordereau</h2>
-      <div class="list-card">
-        ${arrivals
-          .map((a) => {
-            const inv = invByArrival.get(a.id);
-            return `
-              <a class="list-row" href="#${businessBordereauPath(a.id)}">
-                <span class="list-row-body">
-                  <span class="list-row-title">${escapeHtml(a.products?.name || "")} · ${escapeHtml(a.suppliers?.code || "")}</span>
-                  <span class="list-row-meta">Reçu ${a.quantity_received} · Vendu ${inv?.quantity_sold ?? 0}</span>
-                </span>
-                <span class="list-row-amount">${inv?.quantity_remaining ?? a.quantity_received}</span>
-              </a>
-            `;
-          })
-          .join("")}
-      </div>
+        ${products.map((product) => stockProductCardHtml(product, lotsByProduct.get(product.product_id) || [], invByArrival)).join("")}
       </div>
     `;
   } catch (err) {
     body.innerHTML = errorStateHtml(friendlyError(err));
   }
+}
+
+export function stockProductCardHtml(product, lots = [], invByArrival = new Map()) {
+  const available = Number(product.quantity_available) || 0;
+  const unit = unitLabel(product.unit_type, available);
+  const received = Number(product.quantity_received) || 0;
+  const sold = Number(product.quantity_sold) || 0;
+  const adjustments = Number(product.quantity_adjustments) || 0;
+  const showAdjustments = adjustments !== 0;
+  const lotRows = lots
+    .map((arrival) => {
+      const inv = invByArrival.get(arrival.id);
+      const remaining = inv?.quantity_remaining ?? arrival.quantity_received;
+      return `
+        <a class="list-row" href="#${businessBordereauPath(arrival.id)}">
+          <span class="list-row-body">
+            <span class="list-row-title">${escapeHtml(arrival.suppliers?.code || arrival.suppliers?.name || "Lot")}</span>
+            <span class="list-row-meta">Reçu ${arrival.quantity_received} · Vendu ${inv?.quantity_sold ?? 0}</span>
+          </span>
+          <span class="list-row-amount">${remaining}</span>
+        </a>`;
+    })
+    .join("");
+  return `
+    <article class="stock-product-card">
+      <h3 class="stock-product-name">${escapeHtml(product.product_name)}</h3>
+      <p class="stock-product-available">${available} ${escapeHtml(unit)} disponibles</p>
+      <div class="stock-product-stats${showAdjustments ? " is-three" : ""}">
+        <div>
+          <span>Reçus</span>
+          <strong>${received}</strong>
+        </div>
+        <div>
+          <span>Vendus</span>
+          <strong>${sold}</strong>
+        </div>
+        ${
+          showAdjustments
+            ? `<div>
+          <span>Ajustements</span>
+          <strong>${adjustments > 0 ? `+${adjustments}` : adjustments}</strong>
+        </div>`
+            : ""
+        }
+      </div>
+      ${
+        lotRows
+          ? `<details class="stock-product-lots">
+        <summary>Voir les lots</summary>
+        <div class="list-card">${lotRows}</div>
+      </details>`
+          : ""
+      }
+    </article>
+  `;
 }
 
 export function renderAdjustmentForm(root, ctx = {}) {

@@ -23,6 +23,7 @@ import {
   normalizeChurchTransaction,
   normalizeCustomerPayment,
   normalizeSale,
+  normalizeSalePaidAtSale,
   normalizeSupplierPayment,
   paginateHistoryEvents,
   sortHistoryEvents,
@@ -131,6 +132,7 @@ async function fetchBusinessEvents(range, filters) {
   return [
     ...arrivals.map(normalizeArrival),
     ...sales.map(normalizeSale),
+    ...sales.map(normalizeSalePaidAtSale).filter(Boolean),
     ...customerPayments.map(normalizeCustomerPayment),
     ...supplierPayments.map(normalizeSupplierPayment),
     ...expenses.map(normalizeBusinessExpense),

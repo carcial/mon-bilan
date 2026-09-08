@@ -15,6 +15,7 @@ import {
   normalizeChurchTransaction,
   normalizeCustomerPayment,
   normalizeSale,
+  normalizeSalePaidAtSale,
   paginateHistoryEvents,
   saleLineTotal,
   sortHistoryEvents,
@@ -90,6 +91,11 @@ describe("history normalization", () => {
     const event = normalizeSale(saleRow);
     expect(event.amount).toBe(155000);
     expect(event.customerId).toBe("c1");
+    const paidNow = normalizeSalePaidAtSale(saleRow);
+    expect(paidNow.amount).toBe(50000);
+    expect(paidNow.type).toBe(HISTORY_TYPES.customer_payment);
+    expect(paidNow.subtitle).toContain("À la vente");
+    expect(normalizeSalePaidAtSale({ ...saleRow, amount_paid_fcfa: 0 })).toBeNull();
   });
 });
 

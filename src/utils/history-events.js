@@ -5,7 +5,7 @@
 
 import { calculateMerchandiseValue, saleItemsTotal } from "./business-calc.js";
 import { toFcfaInteger } from "./money.js";
-import { isDateInRange } from "./periods.js";
+import { isDateInRange, PERIODS } from "./periods.js";
 import { normalizePersonName } from "./choice-ui.js";
 import { supplierDisplayLabel } from "./supplier-label.js";
 
@@ -211,6 +211,41 @@ export function normalizeArrival(row) {
   };
 }
 
+/**
+ * Sale-time cash collected (sales.amount_paid_fcfa). Not a customer_payments row.
+ * Listed with Paiement client so History agrees with Payments / dashboard cash.
+ */
+export function normalizeSalePaidAtSale(row) {
+  const paid = toFcfaInteger(row.amount_paid_fcfa);
+  if (paid <= 0) return null;
+  const customer = row.customers?.name || "Client";
+  return {
+    id: eventId("sales_paid_at_sale", row.id),
+    domain: HISTORY_DOMAINS.business,
+    type: HISTORY_TYPES.customer_payment,
+    date: row.sale_date,
+    title: "Paiement client",
+    subtitle: `${customer} · À la vente`,
+    amount: paid,
+    direction: "in",
+    sourceId: row.id,
+    sourceTable: "sales",
+    href: row.customer_id ? `/commerce/clients/${row.customer_id}` : `/commerce/vente/${row.id}`,
+    searchText: searchBlob([customer, row.note, "paiement", "vente"]),
+    fundId: null,
+    supplierId: null,
+    customerId: row.customer_id || null,
+    productId: null,
+    createdAt: row.created_at || row.sale_date,
+  };
+}
+
+const SALE_SETTLEMENT_LABELS = {
+  paid: "Payé en totalité",
+  partial: "Paiement partiel",
+  credit: "À crédit",
+};
+
 export function normalizeSale(row) {
   const customer = row.customers?.name || "Client";
   const firstItem = (row.sale_items || [])[0];
@@ -219,23 +254,29 @@ export function normalizeSale(row) {
     (sum, item) => sum + toFcfaInteger(item.quantity),
     0,
   );
+  const settlementLabel = SALE_SETTLEMENT_LABELS[row.settlement_status] || "";
   return {
     id: eventId("sales", row.id),
     domain: HISTORY_DOMAINS.business,
     type: HISTORY_TYPES.sale,
     date: row.sale_date,
     title: "Vente",
-    subtitle: `${customer} · ${product} · ${qty}`,
+    subtitle: [customer, product, String(qty), settlementLabel].filter(Boolean).join(" · "),
     amount: saleLineTotal(row),
     direction: "in",
     sourceId: row.id,
     sourceTable: "sales",
     href: `/commerce/vente/${row.id}`,
-    searchText: searchBlob([customer, product, row.note, "vente"]),
+    searchText: searchBlob([customer, product, row.note, settlementLabel, "vente"]),
     fundId: null,
     supplierId: firstItem?.stock_arrivals?.supplier_id || null,
     customerId: row.customer_id || null,
     productId: firstItem?.product_id || firstItem?.products?.id || null,
+    customerName: customer,
+    productName: product,
+    quantity: qty,
+    settlementStatus: row.settlement_status || "",
+    settlementLabel,
     createdAt: row.created_at || row.sale_date,
   };
 }
@@ -386,6 +427,27 @@ export function filterHistoryEvents(events = [], filters = {}) {
     if (search && !normalizePersonName(event.searchText).includes(search)) return false;
     return true;
   });
+}
+
+export function historyFiltersFromQuery(query, base = {}) {
+  const get = typeof query?.get === "function" ? (key) => query.get(key) : (key) => query?.[key];
+  const period = String(get("period") || "").trim();
+  const type = String(get("type") || "").trim();
+  const from = String(get("from") || "").trim();
+  const to = String(get("to") || "").trim();
+  if (!period && !type && !from && !to) return null;
+  const allowed = new Set(Object.values(PERIODS));
+  return {
+    period: allowed.has(period) ? period : base.period || PERIODS.month,
+    type,
+    fundId: base.fundId || "",
+    supplierId: base.supplierId || "",
+    customerId: base.customerId || "",
+    productId: base.productId || "",
+    search: base.search || "",
+    from,
+    to,
+  };
 }
 
 export function countActiveHistoryFilters(filters = {}, { defaultPeriod = "month", includeSearch = true } = {}) {

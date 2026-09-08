@@ -1,4 +1,4 @@
-import { ROUTES, navigate, matchRoute } from "../router.js";
+import { ROUTES, navigate, matchRoute, getHashPath } from "../router.js";
 import { iconHtml } from "./icons.js";
 import { APP_MODES, getAppMode } from "../state/app-mode.js";
 
@@ -56,8 +56,13 @@ export function renderBottomNav(container, activePath, options = {}) {
 
   container.querySelectorAll("[data-path]").forEach((el) => {
     el.addEventListener("click", (event) => {
-      event.preventDefault();
-      navigate(el.getAttribute("data-path"));
+      const path = el.getAttribute("data-path") || "/";
+      // Same-path tap: re-render. Different path: let the native hash link work
+      // (preventDefault + location.hash in the same click is unreliable on Android).
+      if (getHashPath() === path) {
+        event.preventDefault();
+        navigate(path);
+      }
     });
   });
 }

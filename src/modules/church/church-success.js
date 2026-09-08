@@ -1,5 +1,5 @@
 import { amountHtml } from "../../components/amount.js";
-import { navigate, ROUTES } from "../../router.js";
+import { ROUTES } from "../../router.js";
 import { getChurchTransaction } from "../../services/supabase/church.js";
 import { friendlyError } from "../../utils/errors.js";
 import {
@@ -54,12 +54,6 @@ async function loadSuccess(body, ctx) {
         </a>
       </div>
     `;
-    body.querySelectorAll("a[href^='#']").forEach((link) => {
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        navigate((link.getAttribute("href") || "#/").slice(1));
-      });
-    });
   } catch (err) {
     console.warn("[church] success load failed", err);
     body.innerHTML = errorStateHtml(friendlyError(err));

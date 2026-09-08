@@ -292,6 +292,14 @@ export function saleItemsTotal(sale) {
   );
 }
 
+/** Unique identifiable customers on sales. Ignores rows with no customer_id. */
+export function uniqueKnownCustomerCount(sales = []) {
+  const ids = new Set(
+    (sales || []).map((sale) => sale.customer_id).filter((id) => Boolean(id)),
+  );
+  return ids.size;
+}
+
 /**
  * Remaining per sale after sale-time payment, linked later payments, then unallocated FIFO.
  * Rule: oldest outstanding sale first.
@@ -414,6 +422,63 @@ export function calculatePeriodBusinessTotals({
     }),
     unitsSold,
   };
+}
+
+/** Canonical sources of customer cash. Sale-time paid-now is NOT copied into customer_payments. */
+export const CUSTOMER_CASH_SOURCE = {
+  atSale: "at_sale",
+  later: "later",
+};
+
+/**
+ * Unified customer money-in events. Each franc appears once:
+ * sales.amount_paid_fcfa (paid at sale) + customer_payments (later).
+ * Newest first.
+ */
+export function customerCashEvents({ sales = [], payments = [] } = {}) {
+  const fromSales = (sales || [])
+    .filter((sale) => toFcfaInteger(sale.amount_paid_fcfa) > 0)
+    .map((sale) => ({
+      id: `sale:${sale.id}`,
+      source: CUSTOMER_CASH_SOURCE.atSale,
+      amount_fcfa: toFcfaInteger(sale.amount_paid_fcfa),
+      payment_date: sale.sale_date,
+      created_at: sale.created_at || sale.sale_date,
+      customer_id: sale.customer_id,
+      payment_method: sale.payment_method,
+      sale_id: sale.id,
+      note: sale.note || null,
+      customers: sale.customers || null,
+    }));
+  const fromPayments = (payments || []).map((row) => ({
+    id: row.id,
+    source: CUSTOMER_CASH_SOURCE.later,
+    amount_fcfa: toFcfaInteger(row.amount_fcfa),
+    payment_date: row.payment_date,
+    created_at: row.created_at || row.payment_date,
+    customer_id: row.customer_id,
+    payment_method: row.payment_method,
+    sale_id: row.sale_id,
+    note: row.note || null,
+    customers: row.customers || null,
+  }));
+  return [...fromSales, ...fromPayments].sort((a, b) => {
+    if (a.payment_date !== b.payment_date) return a.payment_date < b.payment_date ? 1 : -1;
+    const ca = String(a.created_at || "");
+    const cb = String(b.created_at || "");
+    if (ca !== cb) return cb.localeCompare(ca);
+    return String(b.id).localeCompare(String(a.id));
+  });
+}
+
+export function cashReceivedOnDate(events = [], dateIso) {
+  return (events || [])
+    .filter((row) => row.payment_date === dateIso)
+    .reduce((sum, row) => sum + toFcfaInteger(row.amount_fcfa), 0);
+}
+
+export function latestCustomerCashEvent(events = []) {
+  return events[0] || null;
 }
 
 export function validateArrival(input = {}) {

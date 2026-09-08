@@ -200,8 +200,9 @@ describe("home stock metric", () => {
 
     const home = stockWatchHtml({ href: "/commerce/stock", inventory, stockUnits });
     expect(home).toContain("Stock");
-    expect(home).toMatch(/list-row-amount">0</);
-    expect(home).not.toMatch(/list-row-amount">1</);
+    expect(home).toContain("0 sac disponible");
+    expect(home).not.toContain("Pommes");
+    expect(home).not.toMatch(/list-row-amount">0</);
 
     const stockScreenTotal = sumAvailableInventory(inventory);
     const reportLabel = `${stockUnits} unités`;
@@ -339,7 +340,8 @@ describe("predictable back navigation", () => {
     expect(fallback.href).toBe("/commerce/clients");
     expect(fallback.label).toBe("Retour aux clients");
 
-    expect(isValidBackTarget("/", "/commerce/clients/abc")).toBe(false);
+    expect(isValidBackTarget("/", "/commerce/clients/abc")).toBe(true);
+    expect(isValidBackTarget("/", "/eglise/entree")).toBe(true);
     expect(isValidBackTarget("/historique", "/eglise/operation/1")).toBe(true);
     expect(isValidBackTarget("/commerce/depenses/nouvelle", "/commerce/depenses")).toBe(false);
     expect(isValidBackTarget("/commerce/depenses", "/commerce/depenses/nouvelle")).toBe(true);

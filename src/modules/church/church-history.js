@@ -3,11 +3,10 @@ import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { openFilterSheet } from "../../components/filter-sheet.js";
 import { iconHtml } from "../../components/icons.js";
-import { navigate, ROUTES } from "../../router.js";
+import { ROUTES } from "../../router.js";
 import { getChurchFunds, getChurchTransactions } from "../../services/supabase/church.js";
 import { formatNumericDateFr } from "../../utils/dates.js";
 import { friendlyError, escapeHtml } from "../../utils/errors.js";
-import { formatFcfa } from "../../utils/money.js";
 import { getPeriodRange, PERIODS } from "../../utils/periods.js";
 import {
   CHURCH_LINKS,
@@ -248,17 +247,6 @@ async function refreshList(listEl) {
         ${visible.map(transactionCardHtml).join("")}
       </div>
     `;
-    listEl.querySelectorAll("[data-id]").forEach((card) => {
-      card.addEventListener("click", () => {
-        navigate(churchOperationPath(card.getAttribute("data-id")));
-      });
-      card.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          navigate(churchOperationPath(card.getAttribute("data-id")));
-        }
-      });
-    });
   } catch (err) {
     console.warn("[church] history list failed", err);
     listEl.innerHTML = errorStateHtml(friendlyError(err));
@@ -271,12 +259,9 @@ async function refreshList(listEl) {
 function transactionCardHtml(tx) {
   const isExpense = tx.transaction_type === "expense";
   return `
-    <article
+    <a
       class="list-row"
-      data-id="${escapeHtml(tx.id)}"
-      role="button"
-      tabindex="0"
-      aria-label="${isExpense ? "Sortie" : "Entrée"} ${escapeHtml(formatFcfa(tx.amount_fcfa))}"
+      href="#${churchOperationPath(tx.id)}"
     >
       <span class="list-row-icon ${isExpense ? "is-out" : "is-in"}">
         ${iconHtml(isExpense ? "arrow-up" : "arrow-down", { weight: "bold" })}
@@ -288,6 +273,6 @@ function transactionCardHtml(tx) {
       <span class="list-row-amount ${isExpense ? "amount-negative" : "amount-positive"}">
         ${amountHtml(tx.amount_fcfa, { className: "amount-sm", signed: true })}
       </span>
-    </article>
+    </a>
   `;
 }

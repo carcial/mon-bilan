@@ -1,9 +1,12 @@
-import { formatFcfa } from "../../utils/money.js";
+import { formatFcfa, toFcfaInteger } from "../../utils/money.js";
 import { escapeHtml } from "../../utils/errors.js";
 import { ROUTES } from "../../router.js";
 import { iconHtml } from "../../components/icons.js";
+import { amountHtml } from "../../components/amount.js";
 import { pageHeaderHtml as sharedPageHeaderHtml, backLinkHtml } from "../../components/page-header.js";
 import { sumAvailableInventory } from "../../utils/business-calc.js";
+import { formatNumericDateFr } from "../../utils/dates.js";
+import { businessCustomerPath } from "./business-routes.js";
 
 export const BUSINESS_LINKS = {
   home: ROUTES.business,
@@ -25,6 +28,10 @@ export const BUSINESS_LINKS = {
   payables: "/commerce/a-payer",
   history: "/commerce/historique",
   report: "/commerce/rapport",
+  todaySales: "/historique?period=today&type=sale",
+  todayCustomers: "/historique?period=today&type=sale",
+  allSales: "/historique?type=sale",
+  supplierPay: "/commerce/a-payer",
 };
 
 export const EXPENSE_LABELS = {
@@ -109,6 +116,46 @@ export function skeletonHtml(lines = 3) {
     return `<div class="skeleton-line${wide}"></div>`;
   }).join("");
   return `<div class="card skeleton-card" aria-hidden="true">${items}</div>`;
+}
+
+export function lastPaymentLine(lastPayment) {
+  if (!lastPayment || toFcfaInteger(lastPayment.amount_fcfa) <= 0) return "Aucun";
+  const date = lastPayment.payment_date || lastPayment.sale_date;
+  return `${formatFcfa(lastPayment.amount_fcfa)} · ${formatNumericDateFr(date)}`;
+}
+
+export function debtorDueLine(dueSale) {
+  if (dueSale?.repayment_expectation === "exact" && dueSale.repayment_exact_date) {
+    return formatNumericDateFr(dueSale.repayment_exact_date);
+  }
+  if (dueSale?.repayment_expectation === "approximate") {
+    const text = String(dueSale.repayment_approx_text || "").trim();
+    return text || "Indéterminée";
+  }
+  return "Indéterminée";
+}
+
+export function debtorCardHtml(row) {
+  const last = lastPaymentLine(row.lastPayment);
+  const dueText = debtorDueLine(row.dueSale);
+  return `
+    <a class="list-row debtor-card" href="#${businessCustomerPath(row.customer.id)}">
+      <span class="debtor-head">
+        <span class="list-row-title">${escapeHtml(row.customer.name)}</span>
+        <span class="debtor-amount">
+          ${amountHtml(row.outstanding, { className: "amount-sm" })}
+          <span class="debtor-amount-label">à recevoir</span>
+        </span>
+      </span>
+      <span class="debtor-block">
+        <span class="debtor-kicker">Dernier paiement</span>
+        <span>${escapeHtml(last)}</span>
+      </span>
+      <span class="debtor-block">
+        <span class="debtor-kicker">Échéance</span>
+        <span>${escapeHtml(dueText)}</span>
+      </span>
+    </a>`;
 }
 
 export function emptyStateHtml({ title, body, actionHref, actionLabel }) {
@@ -211,38 +258,57 @@ export function unitLabel(unitType = "sac", quantity = 1) {
   return unit;
 }
 
+export function stockAvailableCompact(units, unitType = "") {
+  const n = Number(units) || 0;
+  const type = unitType || "unité";
+  const unit = type === "unité"
+    ? n > 1 ? "unités" : "unité"
+    : unitLabel(type, n);
+  return `${n} ${unit}`;
+}
+
+export function stockAvailablePhrase(units, unitType = "") {
+  const n = Number(units) || 0;
+  const type = unitType || "unité";
+  const unit = type === "unité"
+    ? n > 1 ? "unités" : "unité"
+    : unitLabel(type, n);
+  const adj = n > 1 ? "disponibles" : "disponible";
+  return `${n} ${unit} ${adj}`;
+}
+
+export function stockUnitTypeFromInventory(inventory = []) {
+  const types = [...new Set((inventory || []).map((row) => row.unit_type).filter(Boolean))];
+  return types.length === 1 ? types[0] : "";
+}
+
+export function marginOutcomeLabel(margin) {
+  const n = Number(margin) || 0;
+  if (n > 0) return "Gain";
+  if (n < 0) return "Perte";
+  return "Équilibre";
+}
+
 /** Amount the supplier expects for each bag/unit — not a blended cost after fees. */
 export function supplierAmountPerUnitLabel(unitType = "sac") {
   return `Montant fournisseur par ${unitType || "unité"}`;
 }
 
 /**
- * Home stock row: the amount is actual available quantity, never a row/batch count.
+ * Home stock row: one compact available-quantity phrase, never a duplicate integer.
  * @param {{ href: string, inventory?: object[], stockUnits?: number }} props
  */
 export function stockWatchHtml({ href, inventory = [], stockUnits }) {
   const units = stockUnits ?? sumAvailableInventory(inventory);
-  const lowStock = (inventory || []).filter((row) => (Number(row.quantity_available) || 0) <= 2);
-  const hint = lowStock.length
-    ? lowStock
-        .slice(0, 2)
-        .map(
-          (row) =>
-            `${row.quantity_available} ${unitLabel(row.unit_type, row.quantity_available)} ${row.product_name}`,
-        )
-        .join(" · ")
-    : units === 0
-      ? "Aucune unité disponible"
-      : `${units} unité${units > 1 ? "s" : ""} disponible${units > 1 ? "s" : ""}`;
+  const phrase = stockAvailablePhrase(units, stockUnitTypeFromInventory(inventory));
 
   return `
-    <a class="list-row" href="#${href}">
+    <a class="list-row ops-watch-row" href="#${href}">
       <span class="list-row-icon${units <= 2 ? " is-out" : ""}">${iconHtml("package", { weight: "bold" })}</span>
       <span class="list-row-body">
         <span class="list-row-title">Stock</span>
-        <span class="list-row-meta">${escapeHtml(hint)}</span>
       </span>
-      <span class="list-row-amount">${units}</span>
+      <span class="list-row-amount ops-watch-value">${escapeHtml(phrase)}</span>
     </a>
   `;
 }

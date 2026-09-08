@@ -12,7 +12,7 @@ import {
   getSupplierBalances,
   getSupplierDetail,
 } from "../../services/supabase/business.js";
-import { applyCustomerPayment, formatDueExpectation, validateMoneyPayment } from "../../utils/business-calc.js";
+import { applyCustomerPayment, customerCashEvents, CUSTOMER_CASH_SOURCE, formatDueExpectation, saleItemsTotal, validateMoneyPayment } from "../../utils/business-calc.js";
 import { supplierDisplayLabel } from "../../utils/supplier-label.js";
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { displayDateFr, formatNumericDateFr, todayIso } from "../../utils/dates.js";
@@ -225,6 +225,8 @@ async function loadCustomer(body, ctx) {
       return;
     }
     const openSales = (detail.remainders || []).filter((row) => row.remaining > 0);
+    const cashEvents = detail.cashEvents
+      || customerCashEvents({ sales: detail.sales || [], payments: detail.payments || [] });
     body.innerHTML = `
       <article class="card detail-hero-card">
         <h2 class="detail-entity-name">${escapeHtml(detail.customer.name)}</h2>
@@ -277,18 +279,25 @@ async function loadCustomer(body, ctx) {
       <section class="section-block">
       <h2 class="section-title">Paiements</h2>
       ${
-          detail.payments.length
-            ? `<div class="list-card">${detail.payments
-                .map(
-                  (pay) => `
+          cashEvents.length
+            ? `<div class="list-card">${cashEvents
+                .map((pay) => {
+                  const atSale = pay.source === CUSTOMER_CASH_SOURCE.atSale;
+                  const bits = [
+                    formatNumericDateFr(pay.payment_date),
+                    METHOD_LABELS[pay.payment_method] || pay.payment_method || "",
+                    atSale ? "À la vente" : "",
+                    pay.note && !atSale ? pay.note : "",
+                  ].filter(Boolean);
+                  return `
             <article class="list-row">
               <span class="list-row-body">
                 <span class="list-row-title">${escapeHtml(formatFcfa(pay.amount_fcfa))}</span>
-                <span class="list-row-meta">${escapeHtml(formatNumericDateFr(pay.payment_date))} · ${escapeHtml(METHOD_LABELS[pay.payment_method] || pay.payment_method || "")}${pay.note ? ` · ${escapeHtml(pay.note)}` : ""}</span>
+                <span class="list-row-meta">${escapeHtml(bits.join(" · "))}</span>
               </span>
             </article>
-          `,
-                )
+          `;
+                })
                 .join("")}</div>`
             : `<p class="field-hint">Aucun paiement enregistré.</p>`
         }
@@ -298,16 +307,18 @@ async function loadCustomer(body, ctx) {
       ${
           detail.sales.length
             ? `<div class="list-card">${detail.sales
-                .map(
-                  (sale) => `
+                .map((sale) => {
+                  const total = saleItemsTotal(sale);
+                  const paidNow = Number(sale.amount_paid_fcfa) || 0;
+                  return `
             <a class="list-row" href="#${businessSalePath(sale.id)}">
               <span class="list-row-body">
-                <span class="list-row-title">${escapeHtml(formatFcfa(sale.amount_paid_fcfa))}</span>
-                <span class="list-row-meta">${escapeHtml(formatNumericDateFr(sale.sale_date))} · Payé à la vente</span>
+                <span class="list-row-title">${escapeHtml(formatFcfa(total))}</span>
+                <span class="list-row-meta">${escapeHtml(formatNumericDateFr(sale.sale_date))} · Payé à la vente ${escapeHtml(formatFcfa(paidNow))}</span>
               </span>
             </a>
-          `,
-                )
+          `;
+                })
                 .join("")}</div>`
             : emptyStateHtml({ title: "Aucune vente.", actionHref: BUSINESS_LINKS.sale, actionLabel: "Nouvelle vente" })
         }

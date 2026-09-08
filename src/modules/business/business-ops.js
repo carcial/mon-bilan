@@ -22,6 +22,8 @@ import {
 import {
   calculateLineMargin,
   calculateOperatingExpenses,
+  customerCashEvents,
+  CUSTOMER_CASH_SOURCE,
   validateExpense,
 } from "../../utils/business-calc.js";
 import { supplierDisplayLabel } from "../../utils/supplier-label.js";
@@ -42,6 +44,7 @@ import {
   errorStateHtml,
   EXPENSE_LABELS,
   kindBadgeHtml,
+  debtorCardHtml,
   moneyInputHtml,
   pageHeaderHtml,
   METHOD_LABELS,
@@ -65,14 +68,20 @@ export function renderReceivables(root) {
     </section>
   `;
   const body = root.querySelector('[data-role="body"]');
-  Promise.all([getCustomerBalances(), getCustomerPayments()])
-    .then(([balances, payments]) => {
+  const today = todayIso();
+  Promise.all([
+    getCustomerBalances(),
+    getCustomerPayments(),
+    getBusinessReport({ from: today, to: today }),
+  ])
+    .then(([balances, payments, todayReport]) => {
       const owing = balances.filter((row) => row.outstanding > 0);
       const total = owing.reduce((sum, row) => sum + row.outstanding, 0);
-      const today = todayIso();
-      const todayPayments = payments.filter((p) => p.payment_date === today);
-      const todayTotal = todayPayments.reduce((sum, row) => sum + (row.amount_fcfa || 0), 0);
-      const recent = payments.slice(0, 8);
+      const allSales = balances.flatMap((row) => row.sales || []);
+      const cashEvents = customerCashEvents({ sales: allSales, payments });
+      const todayEvents = cashEvents.filter((row) => row.payment_date === today);
+      const todayTotal = todayReport.cashCollected;
+      const recent = cashEvents.slice(0, 8);
       body.innerHTML = `
         <div class="pay-summary-grid">
           <article class="card card-accent-business">
@@ -82,7 +91,7 @@ export function renderReceivables(root) {
           <article class="card">
             <p class="home-metric-label">Paiements reçus aujourd'hui</p>
             <div>${amountHtml(todayTotal, { className: "amount-sm" })}</div>
-            <p class="field-hint">${todayPayments.length} paiement${todayPayments.length > 1 ? "s" : ""}</p>
+            <p class="field-hint">${todayEvents.length} paiement${todayEvents.length > 1 ? "s" : ""}</p>
           </article>
         </div>
         <a class="btn btn-primary btn-block pay-primary-action" href="#${BUSINESS_LINKS.paymentNew}">+ Enregistrer un paiement</a>
@@ -90,28 +99,7 @@ export function renderReceivables(root) {
           <h2 class="section-title">Clients qui doivent encore</h2>
         ${
           owing.length
-            ? `<div class="list-card">${owing
-                .map((row) => {
-                  const due = row.dueSale;
-                  const dueText = due?.repayment_expectation === "exact" && due.repayment_exact_date
-                    ? formatNumericDateFr(due.repayment_exact_date)
-                    : due?.repayment_expectation === "approximate"
-                      ? due.repayment_approx_text
-                      : "Indéterminée";
-                  const last = row.lastPayment
-                    ? `${formatFcfa(row.lastPayment.amount_fcfa)}`
-                    : "Aucun";
-                  return `
-                    <a class="list-row" href="#${businessCustomerPath(row.customer.id)}">
-                      <span class="list-row-body">
-                        <span class="list-row-title">${escapeHtml(row.customer.name)}</span>
-                        <span class="list-row-meta">Doit encore ${escapeHtml(formatFcfa(row.outstanding))}</span>
-                        <span class="list-row-meta">Dernier paiement : ${escapeHtml(last)}</span>
-                        <span class="list-row-meta">Échéance : ${escapeHtml(dueText)}</span>
-                      </span>
-                    </a>`;
-                })
-                .join("")}</div>`
+            ? `<div class="list-card">${owing.map(debtorCardHtml).join("")}</div>`
             : emptyStateHtml({ title: "Personne ne doit d'argent." })
         }
         </section>
@@ -129,16 +117,24 @@ export function renderReceivables(root) {
 function paymentListHtml(rows, empty) {
   if (!rows.length) return `<p class="field-hint">${escapeHtml(empty)}</p>`;
   return `<div class="list-card">${rows
-    .map(
-      (pay) => `
+    .map((pay) => {
+      const atSale = pay.source === CUSTOMER_CASH_SOURCE.atSale || pay.note === "À la vente";
+      const method = METHOD_LABELS[pay.payment_method] || pay.payment_method || "";
+      const bits = [
+        formatNumericDateFr(pay.payment_date),
+        pay.customers?.name || "Client",
+        method,
+        atSale ? "À la vente" : "",
+      ].filter(Boolean);
+      return `
     <article class="list-row">
       <span class="list-row-body">
         <span class="list-row-title">${escapeHtml(formatFcfa(pay.amount_fcfa))}</span>
-        <span class="list-row-meta">${escapeHtml(formatNumericDateFr(pay.payment_date))} · ${escapeHtml(pay.customers?.name || "Client")} · ${escapeHtml(METHOD_LABELS[pay.payment_method] || pay.payment_method || "")}</span>
+        <span class="list-row-meta">${escapeHtml(bits.join(" · "))}</span>
       </span>
     </article>
-  `,
-    )
+  `;
+    })
     .join("")}</div>`;
 }
 

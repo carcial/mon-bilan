@@ -39,6 +39,7 @@ export function navDomain(path) {
 export function backLabelForPath(path, fallback = "Retour") {
   const clean = normalizePath(path);
   const exact = {
+    "/": "Retour à l'accueil",
     "/commerce": "Retour au commerce",
     "/commerce/clients": "Retour aux clients",
     "/commerce/fournisseurs": "Retour aux fournisseurs",
@@ -75,8 +76,10 @@ export function isValidBackTarget(prev, current) {
     return false;
   }
   const dPrev = navDomain(from);
-  if (dPrev === "home") return false;
   const dCur = navDomain(to);
+  if (dPrev === "home") {
+    return dCur !== "home";
+  }
   if (dPrev === dCur) return true;
   return dPrev === "history" || dCur === "history";
 }

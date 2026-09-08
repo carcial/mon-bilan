@@ -1,7 +1,7 @@
 import { amountHtml } from "../../components/amount.js";
 import { openFilterSheet } from "../../components/filter-sheet.js";
 import { iconHtml } from "../../components/icons.js";
-import { navigate } from "../../router.js";
+import { getHashQuery } from "../../router.js";
 import {
   getGlobalHistory,
   getHistoryFilterOptions,
@@ -12,6 +12,7 @@ import { formatNumericDateFr } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
 import {
   countActiveHistoryFilters,
+  historyFiltersFromQuery,
   HISTORY_TYPE_LABELS,
   typeOptionsForDomain,
 } from "../../utils/history-events.js";
@@ -54,16 +55,22 @@ export function renderHistoryScreen(root) {
     historyFilters = { ...DEFAULT_FILTERS };
   }
   lastHistoryDomain = domain;
+  const fromQuery = historyFiltersFromQuery(getHashQuery(), historyFilters);
+  if (fromQuery) historyFilters = fromQuery;
   const subtitle =
     domain === "church"
       ? "Toutes les opérations de la trésorerie de l'église."
-      : "Toutes les opérations de votre commerce.";
+      : historyFilters.type === "sale" && historyFilters.period === PERIODS.today
+        ? "Ventes d'aujourd'hui."
+        : "Toutes les opérations de votre commerce.";
 
   root.innerHTML = `
     <section class="page history-page" aria-labelledby="history-title">
       ${pageHeaderHtml({
-        title: "Historique",
+        title: historyFilters.type === "sale" && historyFilters.period === PERIODS.today ? "Ventes" : "Historique",
         subtitle,
+        backHref: fromQuery ? "/" : undefined,
+        backLabel: "Retour à l'accueil",
       })}
       <div data-role="toolbar">${skeletonHtml(1)}</div>
       <div data-role="chips"></div>
@@ -391,20 +398,6 @@ function renderList(root, options) {
     }
   `;
 
-  listEl.querySelectorAll("[data-href]").forEach((card) => {
-    const href = card.getAttribute("data-href");
-    const go = () => {
-      if (href) navigate(href);
-    };
-    card.addEventListener("click", go);
-    card.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        go();
-      }
-    });
-  });
-
   listEl.querySelector('[data-action="more"]')?.addEventListener("click", async (event) => {
     if (loadingMore) return;
     loadingMore = true;
@@ -430,42 +423,83 @@ function eventIcon(type) {
   return map[type] || "dot";
 }
 
-function eventCardHtml(event) {
+export function eventCardHtml(event) {
   const typeLabel = HISTORY_TYPE_LABELS[event.type] || event.type;
-  const title =
-    event.type === "income" || event.type === "expense"
-      ? event.title
-      : `${typeLabel} · ${event.subtitle.split(" · ")[0]}`;
-  const rest = event.subtitle.includes(" · ")
-    ? event.subtitle.split(" · ").slice(1).join(" · ")
-    : event.type === "income" || event.type === "expense"
-      ? event.subtitle
+  let title;
+  let meta;
+  if (event.type === "sale") {
+    title = event.customerName || event.subtitle.split(" · ")[0] || "Vente";
+    meta = [
+      event.productName,
+      event.quantity != null ? String(event.quantity) : "",
+      event.settlementLabel,
+      formatNumericDateFr(event.date),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  } else if (event.type === "income" || event.type === "expense") {
+    title = event.title;
+    const rest = event.subtitle;
+    meta = [rest, formatNumericDateFr(event.date)].filter(Boolean).join(" · ");
+  } else {
+    title = `${typeLabel} · ${event.subtitle.split(" · ")[0]}`;
+    const rest = event.subtitle.includes(" · ")
+      ? event.subtitle.split(" · ").slice(1).join(" · ")
       : "";
-  const meta = [rest, formatNumericDateFr(event.date)].filter(Boolean).join(" · ");
+    meta = [rest, formatNumericDateFr(event.date)].filter(Boolean).join(" · ");
+  }
   const amountClass =
     event.direction === "out" ? "amount-negative" : event.direction === "in" ? "amount-positive" : "";
-  const amount =
+  const amountInner =
     event.amount == null
       ? ""
-      : `<span class="list-row-amount ${amountClass}">${amountHtml(event.amount, { className: "amount-sm", signed: event.direction !== "neutral" })}</span>`;
+      : amountHtml(event.amount, { className: "amount-sm", signed: event.direction !== "neutral" });
+  const saleHref = escapeHtml(event.href || "/historique");
+  const iconClass = event.direction === "out" ? "is-out" : event.direction === "in" ? "is-in" : "";
+
+  if (event.type === "sale") {
+    const customerHref = event.customerId
+      ? `/commerce/clients/${event.customerId}`
+      : "";
+    const titleHtml = customerHref
+      ? `<a class="list-row-title history-customer-link" href="#${escapeHtml(customerHref)}">${escapeHtml(title)}</a>`
+      : `<span class="list-row-title">${escapeHtml(title)}</span>`;
+    return `
+      <div class="list-row history-card history-card-sale">
+        <a class="list-row-icon ${iconClass}" href="#${saleHref}" aria-label="Voir la vente">
+          ${iconHtml(eventIcon(event.type), { weight: "bold" })}
+        </a>
+        <span class="list-row-body">
+          ${titleHtml}
+          <a class="list-row-meta history-sale-meta" href="#${saleHref}">${escapeHtml(meta)}</a>
+        </span>
+        ${
+          amountInner
+            ? `<a class="list-row-amount ${amountClass}" href="#${saleHref}">${amountInner}</a>`
+            : ""
+        }
+      </div>
+    `;
+  }
 
   return `
-    <article
+    <a
       class="list-row history-card"
-      data-href="${escapeHtml(event.href || "")}"
-      role="button"
-      tabindex="0"
-      aria-label="${escapeHtml(title)} ${escapeHtml(meta)}"
+      href="#${saleHref}"
     >
-      <span class="list-row-icon ${event.direction === "out" ? "is-out" : event.direction === "in" ? "is-in" : ""}">
+      <span class="list-row-icon ${iconClass}">
         ${iconHtml(eventIcon(event.type), { weight: "bold" })}
       </span>
       <span class="list-row-body">
         <span class="list-row-title">${escapeHtml(title)}</span>
         <span class="list-row-meta">${escapeHtml(meta)}</span>
       </span>
-      ${amount}
-    </article>
+      ${
+        amountInner
+          ? `<span class="list-row-amount ${amountClass}">${amountInner}</span>`
+          : ""
+      }
+    </a>
   `;
 }
 

@@ -135,3 +135,17 @@ export function toIsoDate(input = new Date()) {
 export function todayIso(now = new Date()) {
   return toIsoDate(now);
 }
+
+/** "Aujourd'hui" / "Hier" / DD/MM/YYYY — display only. */
+export function relativeDayLabel(input, now = new Date()) {
+  const iso = typeof input === "string" && /^\d{4}-\d{2}-\d{2}/.test(input)
+    ? input.slice(0, 10)
+    : toIsoDate(input);
+  const today = todayIso(now);
+  if (iso === today) return "Aujourd'hui";
+  const ref = parseLocalDate(now) ?? new Date();
+  const yesterdayDate = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
+  yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+  if (iso === toIsoDate(yesterdayDate)) return "Hier";
+  return formatNumericDateFr(iso);
+}

@@ -15,7 +15,9 @@ import {
   calculateSaleTotal,
   calculateSupplierOutstanding,
   computeSaleRemainders,
+  customerCashEvents,
   inferSettlementStatus,
+  latestCustomerCashEvent,
   paidNowForSettlement,
   saleItemsTotal,
   sumAvailableInventory,
@@ -680,7 +682,9 @@ export async function getCustomerBalances() {
         payments: later,
       });
       const remainders = computeSaleRemainders(customerSales, laterPayments);
-      const lastPayment = laterPayments[0] || null;
+      const lastPayment = latestCustomerCashEvent(
+        customerCashEvents({ sales: customerSales, payments: laterPayments }),
+      );
       const dueSale = remainders.find((row) => row.remaining > 0)?.sale || null;
       return {
         customer,
@@ -754,14 +758,18 @@ export async function getCustomerDetail(id) {
   ]);
   const row = balances.find((b) => b.customer.id === id);
   const payments = await getCustomerPayments({ customerId: id });
+  const sales = row?.sales ?? [];
+  const cashEvents = customerCashEvents({ sales, payments });
   return {
     customer,
     purchases: row?.purchases ?? 0,
     paid: row?.paid ?? 0,
     outstanding: row?.outstanding ?? 0,
-    sales: row?.sales ?? [],
+    sales,
     payments,
-    remainders: row?.remainders ?? computeSaleRemainders(row?.sales || [], payments),
+    cashEvents,
+    lastPayment: row?.lastPayment ?? latestCustomerCashEvent(cashEvents),
+    remainders: row?.remainders ?? computeSaleRemainders(sales, payments),
   };
 }
 
@@ -831,6 +839,7 @@ export async function getBordereau(id) {
     remaining,
     revenue,
     estimatedMargin: revenue - supplierMerchandiseSold,
+    supplierMerchandiseSold,
     outstanding,
     items,
   };
@@ -893,6 +902,22 @@ export async function getBusinessHistory(filters = {}) {
       created_at: row.created_at,
       row,
     })),
+    ...sales
+      .filter((row) => toFcfaInteger(row.amount_paid_fcfa) > 0)
+      .map((row) => ({
+        kind: "customer_payment",
+        id: `sale-paid:${row.id}`,
+        date: row.sale_date,
+        created_at: row.created_at,
+        row: {
+          customer_id: row.customer_id,
+          amount_fcfa: row.amount_paid_fcfa,
+          payment_method: row.payment_method,
+          payment_date: row.sale_date,
+          customers: row.customers,
+          note: "À la vente",
+        },
+      })),
     ...customerPayments.map((row) => ({
       kind: "customer_payment",
       id: row.id,

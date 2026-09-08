@@ -1,5 +1,5 @@
 import { amountHtml } from "../../components/amount.js";
-import { navigate, ROUTES } from "../../router.js";
+import { ROUTES } from "../../router.js";
 import { getArrival, getSale, saleTotal } from "../../services/supabase/business.js";
 import { friendlyError } from "../../utils/errors.js";
 import {
@@ -42,12 +42,6 @@ async function load(body, ctx) {
         detailLabel: "Voir la vente",
       });
     }
-    body.querySelectorAll("a[href^='#']").forEach((link) => {
-      link.addEventListener("click", (event) => {
-        event.preventDefault();
-        navigate((link.getAttribute("href") || "#/").slice(1));
-      });
-    });
   } catch (err) {
     body.innerHTML = errorStateHtml(friendlyError(err));
   }
