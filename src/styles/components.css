@@ -471,6 +471,16 @@
 
 .modal-root:empty { display: none; }
 
+.modal-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+}
+
+.modal-layer + .modal-layer {
+  z-index: 60;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

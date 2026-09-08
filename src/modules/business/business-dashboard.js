@@ -2,7 +2,7 @@ import { amountHtml } from "../../components/amount.js";
 import { iconHtml } from "../../components/icons.js";
 import { isSupabaseConfigured } from "../../config.js";
 import { getBusinessReport, getSales } from "../../services/supabase/business.js";
-import { relativeTimeLabel, todayIso } from "../../utils/dates.js";
+import { greetingForNow, relativeTimeLabel, todayIso } from "../../utils/dates.js";
 import { friendlyError, escapeHtml } from "../../utils/errors.js";
 import { formatFcfa } from "../../utils/money.js";
 import {
@@ -24,11 +24,11 @@ import {
  * @param {{ embedded?: boolean }} [ctx]
  */
 export function renderBusinessDashboard(root, ctx = {}) {
+  const greeting = greetingForNow();
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
       <header class="page-header home-greeting ops-home-header">
-        <h1 class="dash-title" id="business-title">Aujourd'hui</h1>
-        <p class="dash-date">Vue d'ensemble de votre activité</p>
+        <h1 class="dash-title" id="business-title">${escapeHtml(greeting)}</h1>
       </header>
       ${
         isSupabaseConfigured()
@@ -93,35 +93,29 @@ export function commerceHomeHtml(report = {}, options = {}) {
 
   return `
     <div class="ops-home">
-      <section class="ops-metric-grid" aria-label="Indicateurs du jour">
-        ${metricCard({
-          href: BUSINESS_LINKS.todaySales,
-          icon: "chart-bar",
-          label: "Ventes du jour",
-          valueHtml: amountHtml(report.revenue || 0, { className: "amount-sm" }),
-          meta: `${salesCount} ${salesWord}`,
-        })}
+      <a class="card ops-sales-hero" href="#${BUSINESS_LINKS.todaySales}">
+        <span class="ops-metric-label">Ventes du jour</span>
+        <span class="ops-metric-value">${amountHtml(report.revenue || 0)}</span>
+        <span class="ops-metric-meta">${salesCount} ${salesWord}</span>
+      </a>
+
+      <section class="ops-secondary-grid" aria-label="Autres indicateurs">
         ${metricCard({
           href: BUSINESS_LINKS.stock,
           icon: "package",
           label: "Stock disponible",
           valueHtml: escapeHtml(stockPhrase),
-          meta: "État actuel",
         })}
         ${metricCard({
           href: BUSINESS_LINKS.todayCustomers,
           icon: "users",
           label: "Clients servis",
           valueHtml: escapeHtml(String(customersToday)),
-          meta: "clients identifiés",
         })}
       </section>
 
       <section class="section-block">
-        <div class="ops-section-intro">
-          <h2 class="section-title">Actions rapides</h2>
-          <p class="ops-section-sub">Accédez rapidement aux principales fonctionnalités</p>
-        </div>
+        <h2 class="section-title">Actions rapides</h2>
         <div class="ops-actions-grid">
           ${actionTile(BUSINESS_LINKS.sale, "shopping-cart", "Nouvelle vente")}
           ${actionTile(BUSINESS_LINKS.arrival, "package", "Nouvel arrivage")}
@@ -167,13 +161,13 @@ export function commerceHomeHtml(report = {}, options = {}) {
   `;
 }
 
-function metricCard({ href, icon, label, valueHtml, meta }) {
+function metricCard({ href, icon, label, valueHtml, meta = "" }) {
   return `
     <a class="card ops-metric-card" href="#${href}">
       <span class="ops-metric-icon">${iconHtml(icon, { weight: "bold", size: "sm" })}</span>
       <span class="ops-metric-label">${escapeHtml(label)}</span>
       <span class="ops-metric-value">${valueHtml}</span>
-      <span class="ops-metric-meta">${escapeHtml(meta)}</span>
+      ${meta ? `<span class="ops-metric-meta">${escapeHtml(meta)}</span>` : ""}
     </a>
   `;
 }
@@ -194,7 +188,7 @@ function rowChevron() {
 
 function watchRow(href, icon, label, value, meta) {
   return `
-    <a class="list-row ops-watch-row" href="#${href}">
+    <a class="list-row ops-money-row" href="#${href}">
       <span class="list-row-icon">${iconHtml(icon, { weight: "bold" })}</span>
       <span class="list-row-body">
         <span class="list-row-title">${escapeHtml(label)}</span>
@@ -217,7 +211,7 @@ function recentSaleRow(sale) {
   const qtyLabel = qty > 0 ? `${qty} article${qty > 1 ? "s" : ""}` : "";
   const when = relativeTimeLabel(sale.created_at || sale.sale_date);
   return `
-    <a class="list-row ops-recent-row" href="#${businessSalePath(sale.id)}">
+    <a class="list-row ops-money-row" href="#${businessSalePath(sale.id)}">
       <span class="list-row-icon">${iconHtml("shopping-cart", { weight: "bold" })}</span>
       <span class="list-row-body">
         <span class="list-row-title">${escapeHtml(name)}</span>

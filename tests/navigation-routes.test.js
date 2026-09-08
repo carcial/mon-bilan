@@ -49,7 +49,7 @@ describe("Commerce ↔ Église routes stay native hash links", () => {
     expect(hashHref(BUSINESS_LINKS.payables)).toBe("#/commerce/a-payer");
     expect(hashHref(BUSINESS_LINKS.stock)).toBe("#/commerce/stock");
     expect(BUSINESS_LINKS.todaySales).toBe("/historique?period=today&type=sale");
-    expect(BUSINESS_LINKS.todayCustomers).toBe(BUSINESS_LINKS.todaySales);
+    expect(BUSINESS_LINKS.todayCustomers).toBe("/commerce/clients?period=today");
     expect(BUSINESS_LINKS.supplierPay).toBe(BUSINESS_LINKS.payables);
     expect(matchBusinessRoute("/commerce/a-payer/paiement")).toEqual({ name: "payables" });
   });
@@ -99,6 +99,6 @@ describe("back navigation after a write screen", () => {
     resetBackStack();
     rememberPath("/commerce");
     rememberPath("/commerce/a-recevoir");
-    expect(resolveBack("/commerce").href).toBe("/commerce");
+    expect(resolveBack("/").href).toBe("/commerce");
   });
 });

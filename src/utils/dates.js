@@ -56,12 +56,32 @@ export function parseLocalDate(input) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+export const APP_TIMEZONE = "Africa/Douala";
+
+/**
+ * Hour 0–23 in a named timezone. Defaults to Cameroon business time.
+ */
+export function hourInTimeZone(date = new Date(), timeZone = APP_TIMEZONE) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      hour: "numeric",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const hour = Number(parts.find((part) => part.type === "hour")?.value);
+    return Number.isFinite(hour) ? hour : date.getHours();
+  } catch {
+    return date.getHours();
+  }
+}
+
 /**
  * @param {Date} [date]
+ * @param {string} [timeZone]
  * @returns {'Bonjour' | 'Bonsoir'}
  */
-export function greetingForNow(date = new Date()) {
-  const hour = date.getHours();
+export function greetingForNow(date = new Date(), timeZone = APP_TIMEZONE) {
+  const hour = hourInTimeZone(date, timeZone);
   return hour >= 18 || hour < 5 ? "Bonsoir" : "Bonjour";
 }
 

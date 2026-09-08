@@ -63,7 +63,7 @@ import {
 export function renderReceivables(root) {
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      ${pageHeaderHtml({ title: "Paiements", subtitle: "Ce que les clients doivent encore.", backHref: ROUTES.business, backLabel: "Retour au commerce" })}
+      ${pageHeaderHtml({ title: "Paiements", subtitle: "Ce que les clients doivent encore.", backHref: ROUTES.home, backLabel: "Retour à l'accueil" })}
       <div data-role="body" class="page-body pay-page">${skeletonHtml(4)}</div>
     </section>
   `;
@@ -153,7 +153,7 @@ export function renderPayables(root) {
 function ledgerPage(root, { title, load, empty, totalLabel, href, name, extra }) {
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      ${pageHeaderHtml({ title, backHref: ROUTES.business })}
+      ${pageHeaderHtml({ title, backHref: ROUTES.home, backLabel: "Retour à l'accueil" })}
       <div class="filter-row" data-role="sort" style="margin-bottom:1rem">
         <button type="button" class="filter-chip is-active" data-sort="amount">Montant le plus élevé</button>
         <button type="button" class="filter-chip" data-sort="oldest">Plus ancien</button>

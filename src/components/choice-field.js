@@ -102,7 +102,8 @@ export function bindChoiceFields(root) {
   root.querySelectorAll('[data-choice-mode="many"] [data-role="choice-trigger"]').forEach((btn) => {
     if (btn.dataset.bound === "1") return;
     btn.dataset.bound = "1";
-    btn.addEventListener("click", async () => {
+    btn.addEventListener("click", async (event) => {
+      event.stopPropagation();
       const field = btn.closest("[data-choice]");
       const hidden = field?.querySelector("[data-role=choice-value]");
       if (!hidden) return;

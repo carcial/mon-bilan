@@ -29,7 +29,7 @@ export const BUSINESS_LINKS = {
   history: "/commerce/historique",
   report: "/commerce/rapport",
   todaySales: "/historique?period=today&type=sale",
-  todayCustomers: "/historique?period=today&type=sale",
+  todayCustomers: "/commerce/clients?period=today",
   allSales: "/historique?type=sale",
   supplierPay: "/commerce/a-payer",
 };

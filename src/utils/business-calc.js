@@ -294,10 +294,17 @@ export function saleItemsTotal(sale) {
 
 /** Unique identifiable customers on sales. Ignores rows with no customer_id. */
 export function uniqueKnownCustomerCount(sales = []) {
-  const ids = new Set(
-    (sales || []).map((sale) => sale.customer_id).filter((id) => Boolean(id)),
-  );
-  return ids.size;
+  return knownCustomerIdsFromSales(sales).size;
+}
+
+export function knownCustomerIdsFromSales(sales = []) {
+  return new Set((sales || []).map((sale) => sale.customer_id).filter((id) => Boolean(id)));
+}
+
+/** Existing customer-balance rows that appear on the given sales. */
+export function customersServedFromSales(balances = [], sales = []) {
+  const ids = knownCustomerIdsFromSales(sales);
+  return (balances || []).filter((row) => ids.has(row.customer?.id));
 }
 
 /**

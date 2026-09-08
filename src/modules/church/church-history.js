@@ -1,7 +1,7 @@
 import { amountHtml } from "../../components/amount.js";
 import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field.js";
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
-import { openFilterSheet } from "../../components/filter-sheet.js";
+import { bindFilterPeriodChips, openFilterSheet } from "../../components/filter-sheet.js";
 import { iconHtml } from "../../components/icons.js";
 import { ROUTES } from "../../router.js";
 import { getChurchFunds, getChurchTransactions } from "../../services/supabase/church.js";
@@ -96,8 +96,8 @@ function filtersHtml() {
   `;
 }
 
-function filterSheetHtml(funds) {
-  const { period, fundId, type, from, to } = historyFilters;
+function filterSheetHtml(funds, draft = historyFilters) {
+  const { period, fundId, type, from, to } = draft;
   const periodButtons = [
     [PERIODS.today, "Aujourd'hui"],
     [PERIODS.week, "Cette semaine"],
@@ -172,37 +172,34 @@ function bindFilters(root, funds) {
     const pending = openFilterSheet({
       title: "Filtrer",
       bodyHtml: filterSheetHtml(funds),
+      onReset: (layer) => {
+        const body = layer.querySelector("[data-role=filter-body]");
+        if (!body) return;
+        body.innerHTML = filterSheetHtml(funds, {
+          period: PERIODS.month,
+          fundId: "",
+          type: "",
+          from: "",
+          to: "",
+        });
+        bindChoiceFields(layer);
+        bindDateFields(layer);
+        bindFilterPeriodChips(layer, PERIODS.custom);
+      },
     });
     if (modal) {
       bindChoiceFields(modal);
       bindDateFields(modal);
-      modal.querySelectorAll("[data-draft-period]").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const value = btn.getAttribute("data-draft-period") || PERIODS.month;
-          const hidden = modal.querySelector('[data-draft="period"]');
-          if (hidden) hidden.value = value;
-          modal.querySelectorAll("[data-draft-period]").forEach((chip) => {
-            chip.classList.toggle("is-active", chip.getAttribute("data-draft-period") === value);
-          });
-          modal.querySelector('[data-role="custom-period"]')?.classList.toggle(
-            "is-hidden",
-            value !== PERIODS.custom,
-          );
-        });
-      });
+      bindFilterPeriodChips(modal, PERIODS.custom);
     }
     const result = await pending;
-    if (result.status === "dismiss") return;
-    if (result.status === "reset") {
-      historyFilters = { period: PERIODS.month, fundId: "", type: "", from: "", to: "", search: historyFilters.search };
-    } else {
-      const draft = result.values || {};
-      historyFilters.period = draft.period || PERIODS.month;
-      historyFilters.type = draft.type || "";
-      historyFilters.fundId = draft.fundId || "";
-      historyFilters.from = draft.from || "";
-      historyFilters.to = draft.to || "";
-    }
+    if (result.status !== "apply") return;
+    const draft = result.values || {};
+    historyFilters.period = draft.period || PERIODS.month;
+    historyFilters.type = draft.type || "";
+    historyFilters.fundId = draft.fundId || "";
+    historyFilters.from = draft.from || "";
+    historyFilters.to = draft.to || "";
     filtersEl.innerHTML = filtersHtml();
     bindFilters(root, funds);
     refreshList(listEl);

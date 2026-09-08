@@ -1,5 +1,5 @@
 import { amountHtml } from "../../components/amount.js";
-import { openFilterSheet } from "../../components/filter-sheet.js";
+import { bindFilterPeriodChips, openFilterSheet } from "../../components/filter-sheet.js";
 import { iconHtml } from "../../components/icons.js";
 import { getHashQuery } from "../../router.js";
 import {
@@ -157,9 +157,9 @@ function bindToolbar(root, options) {
   });
 }
 
-function filterSheetHtml(options) {
+function filterSheetHtml(options, draft = historyFilters) {
   const domain = getActiveDomain();
-  const { period, type, fundId, supplierId, customerId, productId, from, to } = historyFilters;
+  const { period, type, fundId, supplierId, customerId, productId, from, to } = draft;
   const typeOptions = typeOptionsForDomain(domain);
   const periodButtons = [
     [PERIODS.today, "Aujourd'hui"],
@@ -245,48 +245,43 @@ function filterSheetHtml(options) {
   `;
 }
 
+function bindFilterDrafts(modal, options) {
+  if (!modal) return;
+  bindChoiceFields(modal);
+  bindDateFields(modal);
+  bindFilterPeriodChips(modal, PERIODS.custom);
+}
+
+function defaultHistoryDraft() {
+  return { ...DEFAULT_FILTERS, search: historyFilters.search };
+}
+
 async function openAdvancedFilters(root, options) {
   const modal = document.getElementById("modal-root");
   const pending = openFilterSheet({
     title: "Filtrer",
     bodyHtml: filterSheetHtml(options),
+    onReset: (layer) => {
+      const body = layer.querySelector("[data-role=filter-body]");
+      if (!body) return;
+      body.innerHTML = filterSheetHtml(options, defaultHistoryDraft());
+      bindFilterDrafts(layer, options);
+    },
   });
-  if (modal) {
-    bindChoiceFields(modal);
-    bindDateFields(modal);
-  }
-
-  modal?.querySelectorAll("[data-draft-period]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const value = btn.getAttribute("data-draft-period") || PERIODS.month;
-      const hidden = modal.querySelector('[data-draft="period"]');
-      if (hidden) hidden.value = value;
-      modal.querySelectorAll("[data-draft-period]").forEach((chip) => {
-        chip.classList.toggle("is-active", chip.getAttribute("data-draft-period") === value);
-      });
-      modal.querySelector('[data-role="custom-period"]')?.classList.toggle(
-        "is-hidden",
-        value !== PERIODS.custom,
-      );
-    });
-  });
+  bindFilterDrafts(modal, options);
 
   const result = await pending;
-  if (result.status === "dismiss") return;
+  if (result.status !== "apply") return;
 
-  if (result.status === "reset") {
-    historyFilters = { ...DEFAULT_FILTERS, search: historyFilters.search };
-  } else {
-    const draft = result.values || {};
-    historyFilters.period = draft.period || PERIODS.month;
-    historyFilters.type = draft.type || "";
-    historyFilters.fundId = draft.fundId || "";
-    historyFilters.supplierId = draft.supplierId || "";
-    historyFilters.customerId = draft.customerId || "";
-    historyFilters.productId = draft.productId || "";
-    historyFilters.from = draft.from || "";
-    historyFilters.to = draft.to || "";
-  }
+  const draft = result.values || {};
+  historyFilters.period = draft.period || PERIODS.month;
+  historyFilters.type = draft.type || "";
+  historyFilters.fundId = draft.fundId || "";
+  historyFilters.supplierId = draft.supplierId || "";
+  historyFilters.customerId = draft.customerId || "";
+  historyFilters.productId = draft.productId || "";
+  historyFilters.from = draft.from || "";
+  historyFilters.to = draft.to || "";
 
   const toolbarEl = root.querySelector('[data-role="toolbar"]');
   if (toolbarEl) {

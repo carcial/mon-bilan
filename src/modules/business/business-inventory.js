@@ -33,7 +33,8 @@ export function renderStock(root) {
       ${pageHeaderHtml({
         title: "Stock",
         subtitle: "Reçu − vendu ± ajustements.",
-        backHref: ROUTES.business,
+        backHref: ROUTES.home,
+        backLabel: "Retour à l'accueil",
       })}
       <div class="page-body">
         <div class="stack-sm" data-role="stock-actions">
@@ -82,6 +83,21 @@ async function loadStock(body, actions) {
   }
 }
 
+export const STOCK_LOTS_PREVIEW = 8;
+
+function lotRowHtml(arrival, invByArrival) {
+  const inv = invByArrival.get(arrival.id);
+  const remaining = inv?.quantity_remaining ?? arrival.quantity_received;
+  return `
+    <a class="list-row ops-money-row" href="#${businessBordereauPath(arrival.id)}">
+      <span class="list-row-body">
+        <span class="list-row-title">${escapeHtml(arrival.suppliers?.code || arrival.suppliers?.name || "Lot")}</span>
+        <span class="list-row-meta">Reçu ${arrival.quantity_received} · Vendu ${inv?.quantity_sold ?? 0}</span>
+      </span>
+      <span class="list-row-amount">${remaining}</span>
+    </a>`;
+}
+
 export function stockProductCardHtml(product, lots = [], invByArrival = new Map()) {
   const available = Number(product.quantity_available) || 0;
   const unit = unitLabel(product.unit_type, available);
@@ -89,20 +105,10 @@ export function stockProductCardHtml(product, lots = [], invByArrival = new Map(
   const sold = Number(product.quantity_sold) || 0;
   const adjustments = Number(product.quantity_adjustments) || 0;
   const showAdjustments = adjustments !== 0;
-  const lotRows = lots
-    .map((arrival) => {
-      const inv = invByArrival.get(arrival.id);
-      const remaining = inv?.quantity_remaining ?? arrival.quantity_received;
-      return `
-        <a class="list-row" href="#${businessBordereauPath(arrival.id)}">
-          <span class="list-row-body">
-            <span class="list-row-title">${escapeHtml(arrival.suppliers?.code || arrival.suppliers?.name || "Lot")}</span>
-            <span class="list-row-meta">Reçu ${arrival.quantity_received} · Vendu ${inv?.quantity_sold ?? 0}</span>
-          </span>
-          <span class="list-row-amount">${remaining}</span>
-        </a>`;
-    })
-    .join("");
+  const visibleLots = lots.slice(0, STOCK_LOTS_PREVIEW);
+  const extraLots = lots.slice(STOCK_LOTS_PREVIEW);
+  const visibleRows = visibleLots.map((arrival) => lotRowHtml(arrival, invByArrival)).join("");
+  const extraRows = extraLots.map((arrival) => lotRowHtml(arrival, invByArrival)).join("");
   return `
     <article class="stock-product-card">
       <h3 class="stock-product-name">${escapeHtml(product.product_name)}</h3>
@@ -126,11 +132,18 @@ export function stockProductCardHtml(product, lots = [], invByArrival = new Map(
         }
       </div>
       ${
-        lotRows
-          ? `<details class="stock-product-lots">
-        <summary>Voir les lots</summary>
-        <div class="list-card">${lotRows}</div>
-      </details>`
+        visibleRows
+          ? `<div class="stock-product-lots">
+        <div class="list-card">${visibleRows}</div>
+        ${
+          extraRows
+            ? `<details>
+          <summary>Voir plus</summary>
+          <div class="list-card">${extraRows}</div>
+        </details>`
+            : ""
+        }
+      </div>`
           : ""
       }
     </article>

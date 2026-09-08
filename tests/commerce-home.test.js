@@ -8,13 +8,16 @@ import {
   stockWatchHtml,
 } from "../src/modules/business/business-ui.js";
 import { eventCardHtml } from "../src/modules/history/history-screen.js";
-import { historyFiltersFromQuery, normalizeSale } from "../src/utils/history-events.js";
+import { BUSINESS_HISTORY_TYPES, filterHistoryEvents, historyFiltersFromQuery, normalizeSale, typeOptionsForDomain } from "../src/utils/history-events.js";
 import {
   calculateLineMargin,
+  customersServedFromSales,
   uniqueKnownCustomerCount,
   validateSale,
 } from "../src/utils/business-calc.js";
-import { relativeDayLabel, relativeTimeLabel } from "../src/utils/dates.js";
+import { APP_TIMEZONE, greetingForNow, relativeDayLabel, relativeTimeLabel } from "../src/utils/dates.js";
+import { isFilterBackdropDismiss, readFilterSheetValues } from "../src/components/filter-sheet.js";
+import { stockProductCardHtml } from "../src/modules/business/business-inventory.js";
 import {
   rememberPath,
   resetBackStack,
@@ -53,9 +56,10 @@ describe("Commerce Home is a summary layer", () => {
     expect(html).toContain("2 ventes");
     expect(html).toContain("Stock disponible");
     expect(html).toContain("31 sacs");
-    expect(html).toContain("État actuel");
+    expect(html).not.toContain("État actuel");
     expect(html).toContain("Clients servis");
-    expect(html).toContain("clients identifiés");
+    expect(html).not.toContain("clients identifiés");
+    expect(html).not.toContain("Vue d'ensemble de votre activité");
     expect(html).not.toContain("Résultat du mois");
     expect(html).not.toContain("Cash reçu");
     expect(html).not.toContain("Crédit des ventes");
@@ -69,13 +73,13 @@ describe("Commerce Home is a summary layer", () => {
     expect(html).toContain(`href="#${BUSINESS_LINKS.stock}"`);
     expect(html).toContain(`href="#${BUSINESS_LINKS.todayCustomers}"`);
     expect(BUSINESS_LINKS.todaySales).toBe("/historique?period=today&type=sale");
-    expect(BUSINESS_LINKS.todayCustomers).toBe(BUSINESS_LINKS.todaySales);
+    expect(BUSINESS_LINKS.todayCustomers).toBe("/commerce/clients?period=today");
     expect(BUSINESS_LINKS.stock).toBe("/commerce/stock");
   });
 
   it("keeps quick actions on existing write/payment routes", () => {
     expect(html).toContain("Actions rapides");
-    expect(html).toContain("Accédez rapidement aux principales fonctionnalités");
+    expect(html).not.toContain("Accédez rapidement aux principales fonctionnalités");
     expect(html).toContain("Nouvelle vente");
     expect(html).toContain("Nouvel arrivage");
     expect(html).toContain("Paiement client");
@@ -115,6 +119,7 @@ describe("Commerce Home is a summary layer", () => {
     const hrefs = [...html.matchAll(/href="#([^"]+)"/g)].map((match) => match[1].split("?")[0]);
     const allowed = new Set([
       BUSINESS_LINKS.todaySales.split("?")[0],
+      BUSINESS_LINKS.todayCustomers.split("?")[0],
       BUSINESS_LINKS.stock,
       BUSINESS_LINKS.sale,
       BUSINESS_LINKS.arrival,
@@ -137,7 +142,7 @@ describe("canonical dashboard counts", () => {
   it("uses current inventory units, not a today-only stock figure", () => {
     expect(stockAvailableCompact(31, "sac")).toBe("31 sacs");
     expect(html).toContain("31 sacs");
-    expect(html).toContain("État actuel");
+    expect(html).not.toContain("État actuel");
   });
 
   it("counts unique known customers only", () => {
@@ -270,5 +275,113 @@ describe("relative day labels", () => {
     expect(relativeDayLabel("2026-09-07", now)).toBe("Hier");
     expect(relativeTimeLabel(new Date(2026, 8, 8, 11, 48, 0), now)).toBe("Il y a 12 min");
     expect(now.getTime()).toBe(copy.getTime());
+  });
+});
+
+describe("Africa/Douala greeting", () => {
+  it("uses Cameroon time, not the device clock hour", () => {
+    expect(APP_TIMEZONE).toBe("Africa/Douala");
+    expect(greetingForNow(new Date("2026-09-08T07:00:00.000Z"))).toBe("Bonjour");
+    expect(greetingForNow(new Date("2026-09-08T17:00:00.000Z"))).toBe("Bonsoir");
+  });
+});
+
+describe("clients servis reuse existing customers page", () => {
+  it("filters existing customer rows to today's known sale customers", () => {
+    const rows = customersServedFromSales(
+      [
+        { customer: { id: "c1", name: "Jeanne" } },
+        { customer: { id: "c2", name: "Paul" } },
+        { customer: { id: "c3", name: "Anonyme" } },
+      ],
+      [{ customer_id: "c1" }, { customer_id: "c1" }, { customer_id: null }],
+    );
+    expect(rows.map((row) => row.customer.id)).toEqual(["c1"]);
+    expect(BUSINESS_LINKS.todayCustomers).toBe("/commerce/clients?period=today");
+  });
+});
+
+describe("history Tout keeps every supported commerce type", () => {
+  it("treats empty type as all business operations", () => {
+    const ids = typeOptionsForDomain("business").map(([value]) => value);
+    expect(ids[0]).toBe("");
+    expect(ids.slice(1)).toEqual(BUSINESS_HISTORY_TYPES);
+    const events = [
+      { type: "sale", domain: "business", date: "2026-09-08", customerId: null, supplierId: null, productId: null, fundId: null, searchText: "vente" },
+      { type: "arrival", domain: "business", date: "2026-09-08", customerId: null, supplierId: null, productId: null, fundId: null, searchText: "arrivage" },
+      { type: "customer_payment", domain: "business", date: "2026-09-08", customerId: null, supplierId: null, productId: null, fundId: null, searchText: "paiement" },
+      { type: "supplier_payment", domain: "business", date: "2026-09-08", customerId: null, supplierId: null, productId: null, fundId: null, searchText: "fournisseur" },
+      { type: "business_expense", domain: "business", date: "2026-09-08", customerId: null, supplierId: null, productId: null, fundId: null, searchText: "depense" },
+      { type: "adjustment", domain: "business", date: "2026-09-08", customerId: null, supplierId: null, productId: null, fundId: null, searchText: "stock" },
+    ];
+    expect(filterHistoryEvents(events, { type: "" }).map((row) => row.type)).toEqual(BUSINESS_HISTORY_TYPES);
+    expect(filterHistoryEvents(events, { type: "sale" }).map((row) => row.type)).toEqual(["sale"]);
+  });
+});
+
+describe("history filter sheet interactions", () => {
+  it("only dismisses on a true backdrop tap", () => {
+    const backdrop = { id: "backdrop" };
+    expect(isFilterBackdropDismiss(backdrop, backdrop)).toBe(true);
+    expect(isFilterBackdropDismiss({ id: "select" }, backdrop)).toBe(false);
+  });
+
+  it("reads pending drafts without treating that as apply", () => {
+    expect(
+      readFilterSheetValues({
+        querySelectorAll: () => [
+          { getAttribute: (key) => (key === "data-draft" ? "type" : null), value: "" },
+          { getAttribute: (key) => (key === "data-draft" ? "period" : null), value: "today" },
+        ],
+      }),
+    ).toEqual({ type: "", period: "today" });
+  });
+});
+
+describe("stock lots are visible without an extra tap", () => {
+  it("renders lot rows directly", () => {
+    const html = stockProductCardHtml(
+      {
+        product_id: "p1",
+        product_name: "Pommes",
+        unit_type: "sac",
+        quantity_available: 31,
+        quantity_received: 55,
+        quantity_sold: 24,
+        quantity_adjustments: 0,
+      },
+      [{ id: "a1", quantity_received: 25, suppliers: { code: "SOA" } }],
+      new Map([["a1", { quantity_sold: 10, quantity_remaining: 15 }]]),
+    );
+    expect(html).toContain("SOA");
+    expect(html).toContain("Reçu 25");
+    expect(html).not.toContain("Voir les lots");
+    expect(html).not.toContain("Voir plus");
+  });
+});
+
+describe("back from Home destinations", () => {
+  it("returns Home after Stock when Home was previous", () => {
+    resetBackStack();
+    rememberPath("/");
+    rememberPath("/commerce/stock");
+    expect(resolveBack("/").href).toBe("/");
+  });
+
+  it("returns the previous Commerce page, not a hardcoded Home, when that is the stack", () => {
+    resetBackStack();
+    rememberPath("/commerce/clients");
+    rememberPath("/commerce/vente");
+    expect(resolveBack("/commerce", "Retour au commerce").href).toBe("/commerce/clients");
+
+    resetBackStack();
+    rememberPath("/commerce/stock");
+    rememberPath("/commerce/arrivee");
+    expect(resolveBack("/commerce", "Retour au commerce").href).toBe("/commerce/stock");
+
+    resetBackStack();
+    rememberPath("/commerce/fournisseurs");
+    rememberPath("/commerce/a-payer");
+    expect(resolveBack("/", "Retour à l'accueil").href).toBe("/commerce/fournisseurs");
   });
 });

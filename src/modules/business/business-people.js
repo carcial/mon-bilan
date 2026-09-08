@@ -1,6 +1,6 @@
 import { amountHtml } from "../../components/amount.js";
 import { confirmAndWrite } from "../../components/confirm-modal.js";
-import { navigate, ROUTES } from "../../router.js";
+import { getHashQuery, navigate, ROUTES } from "../../router.js";
 import {
   createCustomer,
   createProduct,
@@ -9,10 +9,11 @@ import {
   getCustomerDetail,
   getCustomerBalances,
   getProductInventory,
+  getSales,
   getSupplierBalances,
   getSupplierDetail,
 } from "../../services/supabase/business.js";
-import { applyCustomerPayment, customerCashEvents, CUSTOMER_CASH_SOURCE, formatDueExpectation, saleItemsTotal, validateMoneyPayment } from "../../utils/business-calc.js";
+import { applyCustomerPayment, customerCashEvents, CUSTOMER_CASH_SOURCE, customersServedFromSales, formatDueExpectation, saleItemsTotal, validateMoneyPayment } from "../../utils/business-calc.js";
 import { supplierDisplayLabel } from "../../utils/supplier-label.js";
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { displayDateFr, formatNumericDateFr, todayIso } from "../../utils/dates.js";
@@ -41,14 +42,22 @@ import {
 } from "./business-routes.js";
 
 export function renderCustomerList(root) {
+  const todayOnly = getHashQuery().get("period") === "today";
   listPage(root, {
-    title: "Clients",
-    load: getCustomerBalances,
-    empty: "Aucun client pour le moment.",
+    title: todayOnly ? "Clients servis" : "Clients",
+    subtitle: todayOnly ? "Clients identifiés dans les ventes d'aujourd'hui." : "",
+    load: async () => {
+      const rows = await getCustomerBalances();
+      if (!todayOnly) return rows;
+      const sales = await getSales({ from: todayIso(), to: todayIso() });
+      return customersServedFromSales(rows, sales);
+    },
+    empty: todayOnly ? "Aucun client servi aujourd'hui." : "Aucun client pour le moment.",
     createHref: BUSINESS_LINKS.customerNew,
     createLabel: "Nouveau client",
+    hideCreate: todayOnly,
     card: (row) => `
-      <a class="list-row" href="#${businessCustomerPath(row.customer.id)}">
+      <a class="list-row ops-money-row" href="#${businessCustomerPath(row.customer.id)}">
         <span class="list-row-body">
           <span class="list-row-title">${escapeHtml(row.customer.name)}</span>
           <span class="list-row-meta">À recevoir</span>
@@ -67,7 +76,7 @@ export function renderSupplierList(root) {
     createHref: BUSINESS_LINKS.supplierNew,
     createLabel: "Nouveau fournisseur",
     card: (row) => `
-      <a class="list-row" href="#${businessSupplierPath(row.supplier.id)}">
+      <a class="list-row ops-money-row" href="#${businessSupplierPath(row.supplier.id)}">
         <span class="list-row-body">
           <span class="list-row-title">${escapeHtml(supplierDisplayLabel(row.supplier))}</span>
           <span class="list-row-meta">À payer</span>
@@ -97,12 +106,16 @@ export function renderProductList(root) {
   });
 }
 
-function listPage(root, { title, load, empty, createHref, createLabel, card }) {
+function listPage(root, { title, subtitle = "", load, empty, createHref, createLabel, card, hideCreate = false }) {
   root.innerHTML = `
     <section class="page business-page" aria-labelledby="business-title">
-      ${pageHeaderHtml({ title, backHref: ROUTES.business, backLabel: "Retour au commerce" })}
+      ${pageHeaderHtml({ title, subtitle, backHref: ROUTES.home, backLabel: "Retour à l'accueil" })}
       <div class="page-body">
-        <a class="btn btn-primary btn-block" href="#${createHref}" data-role="create">${escapeHtml(createLabel)}</a>
+        ${
+          hideCreate
+            ? ""
+            : `<a class="btn btn-primary btn-block" href="#${createHref}" data-role="create">${escapeHtml(createLabel)}</a>`
+        }
         <div data-role="body">${skeletonHtml(3)}</div>
       </div>
     </section>
@@ -113,7 +126,11 @@ function listPage(root, { title, load, empty, createHref, createLabel, card }) {
     .then((rows) => {
       if (!rows.length) {
         if (createBtn) createBtn.hidden = true;
-        body.innerHTML = emptyStateHtml({ title: empty, actionHref: createHref, actionLabel: createLabel });
+        body.innerHTML = emptyStateHtml({
+          title: empty,
+          actionHref: hideCreate ? "" : createHref,
+          actionLabel: hideCreate ? "" : createLabel,
+        });
         return;
       }
       if (createBtn) createBtn.hidden = false;

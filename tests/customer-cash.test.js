@@ -139,5 +139,6 @@ describe("stock overview", () => {
     expect(html).toContain("24");
     expect(html).not.toContain("Stock disponible");
     expect(html).not.toContain("Ajustements");
+    expect(html).not.toContain("Voir les lots");
   });
 });
