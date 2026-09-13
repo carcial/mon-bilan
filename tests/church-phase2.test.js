@@ -177,6 +177,7 @@ describe("date period filtering", () => {
     ).toEqual(["2"]);
     expect(isDateInRange("2026-09-01", "2026-09-01", "2026-09-30")).toBe(true);
     expect(isDateInRange("2026-08-31", "2026-09-01", "2026-09-30")).toBe(false);
+    expect(isDateInRange("2026-09-30T18:00:00.000Z", "2026-09-01", "2026-09-30")).toBe(true);
   });
 
   it("parses YYYY-MM-DD as a local date", () => {

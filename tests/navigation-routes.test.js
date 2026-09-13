@@ -24,6 +24,8 @@ describe("Commerce ↔ Église routes stay native hash links", () => {
     expect(CHURCH_LINKS.income).toBe("/eglise/entree");
     expect(CHURCH_LINKS.expense).toBe("/eglise/sortie");
     expect(CHURCH_LINKS.reconciliation).toBe("/eglise/rapprochement");
+    expect(CHURCH_LINKS.weekIncome).toBe("/eglise/historique?period=week&type=income");
+    expect(CHURCH_LINKS.weekExpense).toBe("/eglise/historique?period=week&type=expense");
     expect(matchChurchRoute("/eglise/entree")).toEqual({ name: "income" });
     expect(matchChurchRoute("/eglise/sortie")).toEqual({ name: "expense" });
     expect(matchChurchRoute("/eglise/rapprochement")).toEqual({ name: "reconciliation" });

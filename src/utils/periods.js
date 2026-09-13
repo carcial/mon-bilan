@@ -2,7 +2,7 @@
  * Centralized period helpers — Monday-start weeks, device-local dates.
  */
 
-import { formatNumericDateFr, parseLocalDate, toIsoDate } from "./dates.js";
+import { APP_TIMEZONE, calendarDateInTimeZone, formatNumericDateFr, parseLocalDate, toIsoDate } from "./dates.js";
 
 export const PERIODS = {
   today: "today",
@@ -90,15 +90,41 @@ export function getPeriodRange(period, options = {}) {
 }
 
 /**
+ * Monday 00:00 → Sunday 23:59:59 on the Africa/Douala calendar.
+ * Display period only — does not delete historical rows.
+ * @param {Date | string | number} [input]
+ * @param {string} [timeZone]
+ */
+export function getWeekRangeInAppZone(input = new Date(), timeZone = APP_TIMEZONE) {
+  return getPeriodRange(PERIODS.week, {
+    now: calendarDateInTimeZone(input, timeZone),
+  });
+}
+
+/**
+ * YYYY-MM-DD from a date column or timestamptz string.
+ * Keeps Sunday (and any last-day) rows inside an inclusive period.
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function dateKey(value) {
+  const raw = String(value || "").trim();
+  return /^\d{4}-\d{2}-\d{2}/.test(raw) ? raw.slice(0, 10) : "";
+}
+
+/**
  * Inclusive YYYY-MM-DD comparison (lexicographic, local calendar strings).
  * @param {string} dateIso
  * @param {string | null} from
  * @param {string | null} to
  */
 export function isDateInRange(dateIso, from, to) {
-  if (!dateIso) return false;
-  if (from && dateIso < from) return false;
-  if (to && dateIso > to) return false;
+  const date = dateKey(dateIso);
+  if (!date) return false;
+  const fromKey = from ? dateKey(from) || String(from) : "";
+  const toKey = to ? dateKey(to) || String(to) : "";
+  if (fromKey && date < fromKey) return false;
+  if (toKey && date > toKey) return false;
   return true;
 }
 

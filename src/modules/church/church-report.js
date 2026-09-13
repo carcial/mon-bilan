@@ -8,6 +8,7 @@ import { displayDateFr } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
 import {
   getPeriodRange,
+  getWeekRangeInAppZone,
   monthTitleFr,
   periodLabelFr,
   PERIODS,
@@ -110,10 +111,13 @@ async function loadReport(body) {
   if (!body) return;
   body.innerHTML = skeletonHtml(4);
 
-  const range = getPeriodRange(reportPeriod, {
-    from: reportFrom,
-    to: reportTo,
-  });
+  const range =
+    reportPeriod === PERIODS.week
+      ? getWeekRangeInAppZone()
+      : getPeriodRange(reportPeriod, {
+          from: reportFrom,
+          to: reportTo,
+        });
 
   if (reportPeriod === PERIODS.custom && (!range.from || !range.to)) {
     body.innerHTML = emptyStateHtml({

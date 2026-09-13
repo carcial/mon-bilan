@@ -59,6 +59,35 @@ export function parseLocalDate(input) {
 export const APP_TIMEZONE = "Africa/Douala";
 
 /**
+ * Calendar Y/M/D in a named timezone, as a local Date at midnight.
+ * Used so week boundaries follow Africa/Douala, not the device UTC offset.
+ * @param {Date | string | number} [input]
+ * @param {string} [timeZone]
+ * @returns {Date}
+ */
+export function calendarDateInTimeZone(input = new Date(), timeZone = APP_TIMEZONE) {
+  const fallback = parseLocalDate(input) ?? new Date();
+  const instant = fallback instanceof Date ? fallback : new Date();
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(instant);
+    const year = Number(parts.find((part) => part.type === "year")?.value);
+    const month = Number(parts.find((part) => part.type === "month")?.value);
+    const day = Number(parts.find((part) => part.type === "day")?.value);
+    if (!year || !month || !day) {
+      return new Date(instant.getFullYear(), instant.getMonth(), instant.getDate());
+    }
+    return new Date(year, month - 1, day);
+  } catch {
+    return new Date(instant.getFullYear(), instant.getMonth(), instant.getDate());
+  }
+}
+
+/**
  * Hour 0–23 in a named timezone. Defaults to Cameroon business time.
  */
 export function hourInTimeZone(date = new Date(), timeZone = APP_TIMEZONE) {

@@ -2,8 +2,11 @@
  * Pure church financial calculations (integer FCFA).
  */
 
+import { toIsoDate } from "./dates.js";
 import { MAX_FCFA_INPUT, toFcfaInteger } from "./money.js";
-import { isDateInRange } from "./periods.js";
+import { dateKey, isDateInRange } from "./periods.js";
+
+export const CHURCH_WEEK_DAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
 
 /**
  * balance = opening + income - expenses
@@ -121,6 +124,65 @@ export function filterTransactions(transactions = [], filters = {}) {
     if (type && tx.transaction_type !== type) return false;
     return true;
   });
+}
+
+/**
+ * 7 daily buckets Monday → Sunday for the given week range.
+ * Uses the same filter + calculatePeriodTotals path as weekly cards and History.
+ * @param {Array<{ transaction_date?: string, transaction_type?: string, amount_fcfa?: number }>} transactions
+ * @param {{ from?: string | null, to?: string | null }} range
+ */
+export function buildChurchWeekSeries(transactions = [], range = {}) {
+  const from = dateKey(range.from);
+  const to = dateKey(range.to);
+  const weekRows = from && to ? filterTransactions(transactions, { from, to }) : [];
+  const totals = calculatePeriodTotals(weekRows);
+  const days = [];
+
+  if (!from || !to) {
+    return emptyWeekSeries(totals);
+  }
+
+  const start = parseIsoLocal(from);
+  if (!start) return emptyWeekSeries(totals);
+
+  for (let i = 0; i < 7; i += 1) {
+    const day = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const iso = toIsoDate(day);
+    const dayRows = filterTransactions(weekRows, { from: iso, to: iso });
+    const dayTotals = calculatePeriodTotals(dayRows);
+    days.push({
+      date: iso,
+      label: CHURCH_WEEK_DAY_LABELS[i],
+      ...dayTotals,
+    });
+  }
+
+  return {
+    labels: days.map((day) => day.label),
+    incomeValues: days.map((day) => day.incomeTotal),
+    expenseValues: days.map((day) => day.expenseTotal),
+    days,
+    totals,
+  };
+}
+
+function emptyWeekSeries(totals) {
+  return {
+    labels: [...CHURCH_WEEK_DAY_LABELS],
+    incomeValues: [0, 0, 0, 0, 0, 0, 0],
+    expenseValues: [0, 0, 0, 0, 0, 0, 0],
+    days: [],
+    totals,
+  };
+}
+
+function parseIsoLocal(iso) {
+  const key = dateKey(iso);
+  if (!key) return null;
+  const [year, month, day] = key.split("-").map((part) => Number(part));
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**

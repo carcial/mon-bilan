@@ -133,7 +133,8 @@
   }
 
   .dashboard-grid .hero-card,
-  .dashboard-grid .chart-card {
+  .dashboard-grid .chart-card,
+  .dashboard-grid .church-total-card {
     grid-column: 1;
   }
 

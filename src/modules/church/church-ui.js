@@ -2,6 +2,7 @@
  * Shared Church UI helpers.
  */
 
+import { amountHtml } from "../../components/amount.js";
 import { formatFcfa } from "../../utils/money.js";
 import { escapeHtml } from "../../utils/errors.js";
 import { ROUTES } from "../../router.js";
@@ -140,4 +141,107 @@ export const CHURCH_LINKS = {
   history: ROUTES.churchHistory,
   reconciliation: ROUTES.churchReconciliation,
   report: ROUTES.churchReport,
+  weekIncome: `${ROUTES.churchHistory}?period=week&type=income`,
+  weekExpense: `${ROUTES.churchHistory}?period=week&type=expense`,
 };
+
+/**
+ * Home markup — weekly flow and cumulative balances stay separate.
+ * @param {{
+ *   funds: Array<{ id?: string, name?: string, balance?: number }>,
+ *   total: number,
+ *   weekly: { incomeTotal: number, expenseTotal: number, netMovement: number },
+ * }} model
+ */
+export function churchHomeHtml({ funds, total, weekly }) {
+  const ordinary = pickFund(funds, /ordinaire|principale/i);
+  const works = pickFund(funds, /travaux|œuvre|oeuvre/i);
+  const shown = [ordinary, works].filter(Boolean);
+  const fundLine = shown.length >= 2 ? shown : (funds || []).slice(0, 2);
+
+  return `
+    <div class="dashboard-grid church-home">
+      <article class="hero-card church-week-hero">
+        <p class="hero-kicker">Cette semaine</p>
+        <div class="church-week-metrics">
+          <a class="church-week-metric" href="#${CHURCH_LINKS.weekIncome}">
+            <span>Entrées</span>
+            <strong>${escapeHtml(formatFcfa(weekly.incomeTotal))}</strong>
+          </a>
+          <a class="church-week-metric" href="#${CHURCH_LINKS.weekExpense}">
+            <span>Sorties</span>
+            <strong>${escapeHtml(formatFcfa(weekly.expenseTotal))}</strong>
+          </a>
+          <div class="church-week-metric church-week-net">
+            <span>Solde de la semaine</span>
+            <strong>${escapeHtml(formatFcfa(weekly.netMovement))}</strong>
+          </div>
+        </div>
+      </article>
+
+      <article class="chart-card church-week-chart">
+        <h2 class="section-title">Mouvement de la semaine</h2>
+        <div class="chart-frame">
+          <canvas data-role="flow-chart" aria-label="Entrées et sorties de la semaine"></canvas>
+        </div>
+      </article>
+
+      <article class="card church-total-card">
+        <p class="church-total-kicker">Solde total actuel</p>
+        <div class="church-total-amount">${amountHtml(total)}</div>
+        <div class="church-fund-split">
+          ${fundLine
+            .map(
+              (fund) => `
+            <div class="church-fund-item">
+              <span>${escapeHtml(caisseLabel(fund))}</span>
+              <strong>${escapeHtml(formatFcfa(fund.balance))}</strong>
+            </div>
+          `,
+            )
+            .join("")}
+        </div>
+      </article>
+
+      <section class="section-block church-home-actions">
+        <h2 class="section-title">Actions</h2>
+        <div class="actions-grid">
+          ${actionTile(CHURCH_LINKS.income, "arrow-down", "Ajouter une entrée")}
+          ${actionTile(CHURCH_LINKS.expense, "arrow-up", "Ajouter une sortie")}
+        </div>
+        <div class="secondary-actions">
+          <a class="btn btn-ghost" href="#${CHURCH_LINKS.reconciliation}">
+            ${iconHtml("check-circle", { weight: "bold", size: "sm" })} Vérifier la caisse
+          </a>
+          <a class="btn btn-ghost" href="#${CHURCH_LINKS.history}">
+            ${iconHtml("clock-counter-clockwise", { weight: "bold", size: "sm" })} Historique
+          </a>
+          <a class="btn btn-ghost" href="#${ROUTES.moreReport}">
+            ${iconHtml("chart-bar", { weight: "bold", size: "sm" })} Rapports
+          </a>
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function pickFund(funds, pattern) {
+  return (funds || []).find((fund) => pattern.test(fundName(fund)));
+}
+
+function actionTile(href, icon, label) {
+  return `
+    <a class="action-card" href="#${href}">
+      <span class="action-card-icon">${iconHtml(icon, { weight: "bold", size: "md" })}</span>
+      <span>${escapeHtml(label)}</span>
+    </a>
+  `;
+}
+
+function caisseLabel(fund) {
+  const name = fundName(fund);
+  if (/^caisse\b/i.test(name)) return name;
+  if (/ordinaire/i.test(name)) return "Ordinaire";
+  if (/travaux|œuvre|oeuvre/i.test(name)) return "Travaux";
+  return name;
+}

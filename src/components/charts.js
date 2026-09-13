@@ -9,8 +9,8 @@ import {
   LinearScale,
   Tooltip,
 } from "chart.js";
-import { formatFcfa, formatFcfaCompact } from "../utils/money.js";
-import { startOfWeekMonday } from "../utils/periods.js";
+import { formatFcfa, formatFcfaCompact, toFcfaInteger } from "../utils/money.js";
+import { dateKey, startOfWeekMonday } from "../utils/periods.js";
 import { toIsoDate } from "../utils/dates.js";
 import { escapeHtml } from "../utils/errors.js";
 import { seriesHasActivity, valuesHaveActivity } from "../utils/charts-data.js";
@@ -113,7 +113,7 @@ export function showChartEmpty(canvas, message = "Aucune activité sur cette pé
 export function renderGroupedBarChart(canvas, data) {
   if (!canvas) return null;
   if (!seriesHasActivity(data?.series)) {
-    showChartEmpty(canvas);
+    showChartEmpty(canvas, data?.emptyMessage);
     return null;
   }
   destroyChart(canvas);
@@ -192,10 +192,10 @@ export function weeklySeriesFromRows(rows, getDate, getAmount, weeks = 4) {
     });
   }
   for (const row of rows || []) {
-    const date = getDate(row);
+    const date = dateKey(getDate(row));
     if (!date) continue;
     const bucket = buckets.find((item) => date >= item.from && date <= item.to);
-    if (bucket) bucket.total += Number(getAmount(row) || 0);
+    if (bucket) bucket.total += toFcfaInteger(getAmount(row));
   }
   return {
     labels: buckets.map((item) => item.label),

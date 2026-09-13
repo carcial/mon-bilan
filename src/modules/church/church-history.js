@@ -3,11 +3,11 @@ import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { bindFilterPeriodChips, openFilterSheet } from "../../components/filter-sheet.js";
 import { iconHtml } from "../../components/icons.js";
-import { ROUTES } from "../../router.js";
+import { getHashQuery, ROUTES } from "../../router.js";
 import { getChurchFunds, getChurchTransactions } from "../../services/supabase/church.js";
 import { formatNumericDateFr } from "../../utils/dates.js";
 import { friendlyError, escapeHtml } from "../../utils/errors.js";
-import { getPeriodRange, PERIODS } from "../../utils/periods.js";
+import { getPeriodRange, getWeekRangeInAppZone, PERIODS } from "../../utils/periods.js";
 import {
   CHURCH_LINKS,
   emptyStateHtml,
@@ -34,6 +34,7 @@ let historyFilters = {
  * @param {HTMLElement} root
  */
 export function renderChurchHistory(root) {
+  applyHistoryQuery(getHashQuery());
   root.innerHTML = `
     <section class="page church-page" aria-labelledby="church-title">
       ${pageHeaderHtml({
@@ -48,6 +49,21 @@ export function renderChurchHistory(root) {
   `;
 
   loadHistory(root);
+}
+
+function applyHistoryQuery(query) {
+  if (!query || typeof query.get !== "function") return;
+  const period = String(query.get("period") || "").trim();
+  const type = String(query.get("type") || "").trim();
+  const fundId = String(query.get("fundId") || "").trim();
+  if (!period && !type && !fundId) return;
+  if (period && Object.values(PERIODS).includes(period)) {
+    historyFilters.period = period;
+  }
+  if (type === "income" || type === "expense" || type === "") {
+    historyFilters.type = type;
+  }
+  if (fundId) historyFilters.fundId = fundId;
 }
 
 async function loadHistory(root) {
@@ -209,10 +225,13 @@ function bindFilters(root, funds) {
 async function refreshList(listEl) {
   listEl.innerHTML = skeletonHtml(3);
   try {
-    const range = getPeriodRange(historyFilters.period, {
-      from: historyFilters.from,
-      to: historyFilters.to,
-    });
+    const range =
+      historyFilters.period === PERIODS.week
+        ? getWeekRangeInAppZone()
+        : getPeriodRange(historyFilters.period, {
+            from: historyFilters.from,
+            to: historyFilters.to,
+          });
     const rows = await getChurchTransactions({
       from: range.from,
       to: range.to,
