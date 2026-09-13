@@ -2,7 +2,7 @@ import { amountHtml } from "../../components/amount.js";
 import { renderDonutChart, renderGroupedBarChart } from "../../components/charts.js";
 import { ROUTES } from "../../router.js";
 import { getChurchReport } from "../../services/supabase/church.js";
-import { formatFcfa, formatFcfaSigned } from "../../utils/money.js";
+import { formatFcfa } from "../../utils/money.js";
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { displayDateFr } from "../../utils/dates.js";
 import { escapeHtml, friendlyError } from "../../utils/errors.js";
@@ -15,6 +15,7 @@ import {
 } from "../../utils/periods.js";
 import {
   CHURCH_LINKS,
+  churchReportMetricsHtml,
   emptyStateHtml,
   errorStateHtml,
   fundName,
@@ -183,15 +184,11 @@ function reportHtml(report, range) {
           })
     }
 
-    <article class="hero-card">
+    <article class="hero-card church-report-hero">
       <p class="hero-kicker">Solde de fin</p>
       <div>${amountHtml(endingTotal)}</div>
-      <div class="hero-metrics">
-        <div class="hero-metric"><span>Entrées</span><strong>${escapeHtml(formatFcfa(totals.incomeTotal))}</strong></div>
-        <div class="hero-metric"><span>Sorties</span><strong>${escapeHtml(formatFcfa(totals.expenseTotal))}</strong></div>
-        <div class="hero-metric"><span>Variation</span><strong>${escapeHtml(formatFcfaSigned(totals.netMovement))}</strong></div>
-      </div>
-      ${range.to ? `<p class="field-hint" style="color:rgba(255,255,255,0.78);margin-top:1rem">Au ${escapeHtml(displayDateFr(range.to))}</p>` : ""}
+      ${churchReportMetricsHtml(totals)}
+      ${range.to ? `<p class="field-hint church-report-asof">Au ${escapeHtml(displayDateFr(range.to))}</p>` : ""}
     </article>
 
     <article class="chart-card">

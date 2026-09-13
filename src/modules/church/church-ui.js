@@ -3,11 +3,13 @@
  */
 
 import { amountHtml } from "../../components/amount.js";
-import { formatFcfa } from "../../utils/money.js";
+import { formatFcfa, formatFcfaSigned } from "../../utils/money.js";
+import { formatNumericDateFr } from "../../utils/dates.js";
 import { escapeHtml } from "../../utils/errors.js";
 import { ROUTES } from "../../router.js";
 import { iconHtml } from "../../components/icons.js";
 import { pageHeaderHtml as sharedPageHeaderHtml, backLinkHtml } from "../../components/page-header.js";
+import { churchOperationPath } from "./church-routes.js";
 
 export { backLinkHtml };
 
@@ -148,66 +150,38 @@ export const CHURCH_LINKS = {
 /**
  * Home markup — weekly flow and cumulative balances stay separate.
  * @param {{
- *   funds: Array<{ id?: string, name?: string, balance?: number }>,
+ *   funds?: Array<{ id?: string, name?: string, balance?: number }>,
  *   total: number,
  *   weekly: { incomeTotal: number, expenseTotal: number, netMovement: number },
  * }} model
  */
-export function churchHomeHtml({ funds, total, weekly }) {
-  const ordinary = pickFund(funds, /ordinaire|principale/i);
-  const works = pickFund(funds, /travaux|œuvre|oeuvre/i);
-  const shown = [ordinary, works].filter(Boolean);
-  const fundLine = shown.length >= 2 ? shown : (funds || []).slice(0, 2);
-
+export function churchHomeHtml({ total, weekly }) {
   return `
-    <div class="dashboard-grid church-home">
-      <article class="hero-card church-week-hero">
-        <p class="hero-kicker">Cette semaine</p>
-        <div class="church-week-metrics">
-          <a class="church-week-metric" href="#${CHURCH_LINKS.weekIncome}">
-            <span>Entrées</span>
-            <strong>${escapeHtml(formatFcfa(weekly.incomeTotal))}</strong>
+    <div class="church-home">
+      <section class="church-week-block" aria-label="Cette semaine">
+        <a class="church-week-income" href="#${CHURCH_LINKS.weekIncome}">
+          <span class="church-week-label">Entrées de la semaine</span>
+          <span class="church-week-income-amount">${amountHtml(weekly.incomeTotal)}</span>
+        </a>
+        <div class="church-week-pair">
+          <a class="church-week-card" href="#${CHURCH_LINKS.weekExpense}">
+            <span class="church-week-label">Sorties</span>
+            <strong class="church-week-card-amount">${escapeHtml(formatFcfa(weekly.expenseTotal))}</strong>
           </a>
-          <a class="church-week-metric" href="#${CHURCH_LINKS.weekExpense}">
-            <span>Sorties</span>
-            <strong>${escapeHtml(formatFcfa(weekly.expenseTotal))}</strong>
-          </a>
-          <div class="church-week-metric church-week-net">
-            <span>Solde de la semaine</span>
-            <strong>${escapeHtml(formatFcfa(weekly.netMovement))}</strong>
+          <div class="church-week-card${weekly.netMovement < 0 ? " is-negative" : ""}">
+            <span class="church-week-label">Solde de la semaine</span>
+            <strong class="church-week-card-amount">${escapeHtml(
+              weekly.netMovement < 0 ? formatFcfaSigned(weekly.netMovement) : formatFcfa(weekly.netMovement),
+            )}</strong>
           </div>
         </div>
-      </article>
-
-      <article class="chart-card church-week-chart">
-        <h2 class="section-title">Mouvement de la semaine</h2>
-        <div class="chart-frame">
-          <canvas data-role="flow-chart" aria-label="Entrées et sorties de la semaine"></canvas>
-        </div>
-      </article>
-
-      <article class="card church-total-card">
-        <p class="church-total-kicker">Solde total actuel</p>
-        <div class="church-total-amount">${amountHtml(total)}</div>
-        <div class="church-fund-split">
-          ${fundLine
-            .map(
-              (fund) => `
-            <div class="church-fund-item">
-              <span>${escapeHtml(caisseLabel(fund))}</span>
-              <strong>${escapeHtml(formatFcfa(fund.balance))}</strong>
-            </div>
-          `,
-            )
-            .join("")}
-        </div>
-      </article>
+      </section>
 
       <section class="section-block church-home-actions">
         <h2 class="section-title">Actions</h2>
-        <div class="actions-grid">
-          ${actionTile(CHURCH_LINKS.income, "arrow-down", "Ajouter une entrée")}
-          ${actionTile(CHURCH_LINKS.expense, "arrow-up", "Ajouter une sortie")}
+        <div class="actions-grid church-actions-grid">
+          ${actionTile(CHURCH_LINKS.income, "arrow-down", "Enregistrer une entrée")}
+          ${actionTile(CHURCH_LINKS.expense, "arrow-up", "Enregistrer une sortie")}
         </div>
         <div class="secondary-actions">
           <a class="btn btn-ghost" href="#${CHURCH_LINKS.reconciliation}">
@@ -221,27 +195,79 @@ export function churchHomeHtml({ funds, total, weekly }) {
           </a>
         </div>
       </section>
+
+      <article class="card church-total-card">
+        <p class="church-total-kicker">Solde actuel total</p>
+        <div class="church-total-amount">${amountHtml(total)}</div>
+      </article>
+
+      <article class="chart-card church-week-chart">
+        <h2 class="section-title">Mouvement de la semaine</h2>
+        <div class="chart-frame">
+          <canvas data-role="flow-chart" aria-label="Entrées et sorties de la semaine"></canvas>
+        </div>
+      </article>
     </div>
   `;
 }
 
-function pickFund(funds, pattern) {
-  return (funds || []).find((fund) => pattern.test(fundName(fund)));
-}
-
 function actionTile(href, icon, label) {
   return `
-    <a class="action-card" href="#${href}">
+    <a class="action-card action-card-home church-action-card" href="#${href}">
       <span class="action-card-icon">${iconHtml(icon, { weight: "bold", size: "md" })}</span>
-      <span>${escapeHtml(label)}</span>
+      <span class="action-card-label">${escapeHtml(label)}</span>
     </a>
   `;
 }
 
-function caisseLabel(fund) {
-  const name = fundName(fund);
-  if (/^caisse\b/i.test(name)) return name;
-  if (/ordinaire/i.test(name)) return "Ordinaire";
-  if (/travaux|œuvre|oeuvre/i.test(name)) return "Travaux";
-  return name;
+/**
+ * Church History row — sign and color follow transaction_type, not the amount sign.
+ * @param {{ id: string, transaction_type?: string, amount_fcfa?: number, reason?: string, note?: string, transaction_date?: string, church_funds?: { name?: string } }} tx
+ */
+export function churchHistoryRowHtml(tx) {
+  const isExpense = tx.transaction_type === "expense";
+  return `
+    <a
+      class="list-row church-history-row"
+      href="#${churchOperationPath(tx.id)}"
+    >
+      <span class="list-row-icon ${isExpense ? "is-out" : "is-in"}">
+        ${iconHtml(isExpense ? "arrow-up" : "arrow-down", { weight: "bold" })}
+      </span>
+      <span class="list-row-body">
+        <span class="list-row-title">${escapeHtml(tx.reason)}</span>
+        <span class="list-row-meta">${typeBadgeHtml(tx.transaction_type)} · ${escapeHtml(fundName(tx.church_funds))} · ${escapeHtml(formatNumericDateFr(tx.transaction_date))}${noteIndicatorHtml(tx.note) ? " · Note" : ""}</span>
+      </span>
+      <span class="list-row-amount ${isExpense ? "amount-negative" : "amount-positive"}">
+        ${amountHtml(tx.amount_fcfa, {
+          className: "amount-sm",
+          signed: true,
+          tone: isExpense ? "out" : "in",
+        })}
+      </span>
+    </a>
+  `;
+}
+
+/**
+ * Report period totals as aligned label/value rows.
+ * @param {{ incomeTotal: number, expenseTotal: number, netMovement: number }} totals
+ */
+export function churchReportMetricsHtml(totals) {
+  return `
+    <div class="church-report-rows">
+      <div class="church-report-row">
+        <span>Entrées</span>
+        <strong>${escapeHtml(formatFcfa(totals.incomeTotal))}</strong>
+      </div>
+      <div class="church-report-row">
+        <span>Sorties</span>
+        <strong>${escapeHtml(formatFcfa(totals.expenseTotal))}</strong>
+      </div>
+      <div class="church-report-row">
+        <span>Variation</span>
+        <strong class="${totals.netMovement < 0 ? "amount-negative" : ""}">${escapeHtml(formatFcfaSigned(totals.netMovement))}</strong>
+      </div>
+    </div>
+  `;
 }

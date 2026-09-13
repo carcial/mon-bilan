@@ -12,7 +12,12 @@ import {
 import { calendarDateInTimeZone } from "../src/utils/dates.js";
 import { toFcfaInteger } from "../src/utils/money.js";
 import { dateKey, getPeriodRange, getWeekRangeInAppZone, isDateInRange, PERIODS } from "../src/utils/periods.js";
-import { CHURCH_LINKS, churchHomeHtml } from "../src/modules/church/church-ui.js";
+import {
+  CHURCH_LINKS,
+  churchHistoryRowHtml,
+  churchHomeHtml,
+  churchReportMetricsHtml,
+} from "../src/modules/church/church-ui.js";
 
 const WEEK = { from: "2026-09-07", to: "2026-09-13" };
 
@@ -209,28 +214,90 @@ describe("Church chart regression", () => {
 });
 
 describe("Church home markup", () => {
-  it("shows weekly flow, cumulative total, funds, and History click-through", () => {
-    const html = churchHomeHtml({
-      funds: [
-        { id: "ord", name: "Ordinaire", balance: 400000 },
-        { id: "wrk", name: "Travaux", balance: 250000 },
-      ],
-      total: 650000,
-      weekly: { incomeTotal: 170000, expenseTotal: 20000, netMovement: 150000 },
-      week: WEEK,
-    });
-    expect(html).toContain("Cette semaine");
-    expect(html).toContain("Entrées");
+  const html = churchHomeHtml({
+    funds: [
+      { id: "ord", name: "Ordinaire", balance: 400000 },
+      { id: "wrk", name: "Travaux", balance: 250000 },
+    ],
+    total: 650000,
+    weekly: { incomeTotal: 170000, expenseTotal: 20000, netMovement: 150000 },
+    week: WEEK,
+  });
+
+  it("shows weekly flow, cumulative total, and History click-through", () => {
+    expect(html).toContain("Entrées de la semaine");
     expect(html).toContain("Sorties");
     expect(html).toContain("Solde de la semaine");
-    expect(html).toContain("Solde total actuel");
-    expect(html).toContain("Ordinaire");
-    expect(html).toContain("Travaux");
+    expect(html).toContain("Solde actuel total");
     expect(html).toContain("#/eglise/historique?period=week&type=income");
     expect(html).toContain("#/eglise/historique?period=week&type=expense");
     expect(html).toMatch(/170[\s\u00A0\u202F]?000/);
     expect(html).toMatch(/650[\s\u00A0\u202F]?000/);
     expect(html).not.toContain("Mouvement du mois");
+    expect(html).not.toContain("Ordinaire");
+    expect(html).not.toContain("Travaux");
+  });
+
+  it("places actions before the total and the graph", () => {
+    const incomeAt = html.indexOf("Entrées de la semaine");
+    const sortiesAt = html.indexOf("Sorties");
+    const weekNetAt = html.indexOf("Solde de la semaine");
+    const actionsAt = html.indexOf("Enregistrer une entrée");
+    const totalAt = html.indexOf("Solde actuel total");
+    const chartAt = html.indexOf("Mouvement de la semaine");
+    expect(incomeAt).toBeGreaterThan(-1);
+    expect(incomeAt).toBeLessThan(sortiesAt);
+    expect(sortiesAt).toBeLessThan(weekNetAt);
+    expect(weekNetAt).toBeLessThan(actionsAt);
+    expect(actionsAt).toBeLessThan(totalAt);
+    expect(totalAt).toBeLessThan(chartAt);
+    expect(html).toContain("Enregistrer une sortie");
+    expect(html).toContain("Vérifier la caisse");
+  });
+});
+
+describe("Church History income/expense styling", () => {
+  it("marks income with + and the positive class from the transaction type", () => {
+    const html = churchHistoryRowHtml({
+      id: "in-1",
+      transaction_type: "income",
+      amount_fcfa: 85000,
+      reason: "Quête dimanche",
+      transaction_date: "2026-09-13",
+      church_funds: { name: "Ordinaire" },
+    });
+    expect(html).toContain("Quête dimanche");
+    expect(html).toContain("amount-positive");
+    expect(html).toMatch(/\+\s*85[\s\u00A0\u202F]?000/);
+    expect(html).not.toContain("amount-negative");
+  });
+
+  it("marks expense with − and the negative class even when the stored amount is positive", () => {
+    const html = churchHistoryRowHtml({
+      id: "out-1",
+      transaction_type: "expense",
+      amount_fcfa: 1500,
+      reason: "Achat d'eau",
+      transaction_date: "2026-09-13",
+      church_funds: { name: "Ordinaire" },
+    });
+    expect(html).toContain("Achat d&#39;eau");
+    expect(html).toContain("amount-negative");
+    expect(html).toMatch(/−\s*1[\s\u00A0\u202F]?500/);
+    expect(html).not.toMatch(/\+\s*1[\s\u00A0\u202F]?500/);
+  });
+});
+
+describe("Church report metric rows", () => {
+  it("keeps each label with its value on the same row", () => {
+    const html = churchReportMetricsHtml({
+      incomeTotal: 0,
+      expenseTotal: 1500,
+      netMovement: -1500,
+    });
+    expect(html).toMatch(/<span>Entrées<\/span>\s*<strong>0\s*FCFA<\/strong>/);
+    expect(html).toMatch(/<span>Sorties<\/span>\s*<strong>1[\s\u00A0\u202F]?500\s*FCFA<\/strong>/);
+    expect(html).toMatch(/<span>Variation<\/span>\s*<strong class="amount-negative">−1[\s\u00A0\u202F]?500\s*FCFA<\/strong>/);
   });
 });
 

@@ -1,24 +1,20 @@
-import { amountHtml } from "../../components/amount.js";
 import { bindChoiceFields, choiceFieldHtml } from "../../components/choice-field.js";
 import { bindDateFields, dateFieldHtml } from "../../components/date-field.js";
 import { bindFilterPeriodChips, openFilterSheet } from "../../components/filter-sheet.js";
 import { iconHtml } from "../../components/icons.js";
 import { getHashQuery, ROUTES } from "../../router.js";
 import { getChurchFunds, getChurchTransactions } from "../../services/supabase/church.js";
-import { formatNumericDateFr } from "../../utils/dates.js";
 import { friendlyError, escapeHtml } from "../../utils/errors.js";
 import { getPeriodRange, getWeekRangeInAppZone, PERIODS } from "../../utils/periods.js";
 import {
   CHURCH_LINKS,
+  churchHistoryRowHtml,
   emptyStateHtml,
   errorStateHtml,
   fundName,
-  noteIndicatorHtml,
   pageHeaderHtml,
   skeletonHtml,
-  typeBadgeHtml,
 } from "./church-ui.js";
-import { churchOperationPath } from "./church-routes.js";
 
 /** @type {{ period: string, fundId: string, type: string, from: string, to: string }} */
 let historyFilters = {
@@ -260,7 +256,7 @@ async function refreshList(listEl) {
 
     listEl.innerHTML = `
       <div class="list-card">
-        ${visible.map(transactionCardHtml).join("")}
+        ${visible.map(churchHistoryRowHtml).join("")}
       </div>
     `;
   } catch (err) {
@@ -270,25 +266,4 @@ async function refreshList(listEl) {
       refreshList(listEl);
     });
   }
-}
-
-function transactionCardHtml(tx) {
-  const isExpense = tx.transaction_type === "expense";
-  return `
-    <a
-      class="list-row"
-      href="#${churchOperationPath(tx.id)}"
-    >
-      <span class="list-row-icon ${isExpense ? "is-out" : "is-in"}">
-        ${iconHtml(isExpense ? "arrow-up" : "arrow-down", { weight: "bold" })}
-      </span>
-      <span class="list-row-body">
-        <span class="list-row-title">${escapeHtml(tx.reason)}</span>
-        <span class="list-row-meta">${typeBadgeHtml(tx.transaction_type)} · ${escapeHtml(fundName(tx.church_funds))} · ${escapeHtml(formatNumericDateFr(tx.transaction_date))}${noteIndicatorHtml(tx.note) ? " · Note" : ""}</span>
-      </span>
-      <span class="list-row-amount ${isExpense ? "amount-negative" : "amount-positive"}">
-        ${amountHtml(tx.amount_fcfa, { className: "amount-sm", signed: true })}
-      </span>
-    </a>
-  `;
 }

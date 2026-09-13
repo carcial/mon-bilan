@@ -1,38 +1,103 @@
 .church-home {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-6);
 }
 
-.church-week-metrics {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: var(--space-4);
-  margin-top: var(--space-4);
+.church-week-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
 }
 
-.church-week-metric {
-  display: block;
+.church-week-income {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-6);
+  border-radius: var(--radius-hero);
+  background: linear-gradient(160deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #fff;
+  text-decoration: none;
+  box-shadow: 0 14px 32px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.church-week-income:active {
+  opacity: 0.92;
+}
+
+.church-week-income .church-week-label {
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.church-week-income-amount .amount,
+.church-week-income-amount .amount-positive,
+.church-week-income-amount .amount-negative {
+  color: #fff;
+  font-size: clamp(1.85rem, 7.2vw, 2.55rem);
+  white-space: nowrap;
+}
+
+.church-week-income-amount .amount-unit {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.church-week-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+
+.church-week-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 5.5rem;
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
   text-decoration: none;
   color: inherit;
-  min-height: var(--touch-min);
+  box-shadow: var(--shadow-card);
 }
 
-.church-week-metric span {
-  display: block;
+a.church-week-card:active {
+  transform: scale(0.99);
+}
+
+.church-week-card .church-week-label {
   font-size: var(--text-sm);
-  color: rgba(255, 255, 255, 0.82);
-  margin-bottom: 0.25rem;
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
 }
 
-.church-week-metric strong {
-  display: block;
-  font-size: clamp(1.25rem, 5vw, 1.65rem);
+.church-week-card-amount {
+  font-size: clamp(1.15rem, 4.4vw, 1.45rem);
   font-weight: var(--weight-bold);
   letter-spacing: -0.02em;
   white-space: nowrap;
 }
 
-a.church-week-metric:active {
-  opacity: 0.88;
+.church-week-card.is-negative .church-week-card-amount {
+  color: var(--danger);
+}
+
+.church-home-actions .section-title {
+  margin-bottom: 0;
+}
+
+.church-action-card {
+  min-height: 6.5rem;
+  justify-content: flex-start;
+  padding: var(--space-4);
+  font-size: var(--text-md);
 }
 
 .church-total-card {
@@ -52,36 +117,72 @@ a.church-week-metric:active {
 }
 
 .church-total-amount .amount {
-  font-size: var(--text-amount);
+  font-size: clamp(1.7rem, 6vw, 2.2rem);
+  white-space: nowrap;
 }
 
-.church-fund-split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
+.church-page .church-history-row .list-row-title,
+.church-page .church-history-row .list-row-meta {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.church-page .church-history-row .list-row-amount,
+.church-page .church-history-row .list-row-amount .amount,
+.church-page .church-history-row .list-row-amount .amount-sm {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.church-page .church-history-row .amount-positive,
+.church-page .church-history-row .amount-positive .amount-unit {
+  color: var(--success);
+}
+
+.church-page .church-history-row .amount-negative,
+.church-page .church-history-row .amount-negative .amount-unit {
+  color: var(--danger);
+}
+
+.church-report-rows {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-3);
   margin-top: var(--space-5);
   padding-top: var(--space-4);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
 }
 
-.church-fund-item span {
-  display: block;
+.church-report-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.church-report-row span {
+  min-width: 0;
   font-size: var(--text-sm);
-  color: var(--text-secondary);
-  margin-bottom: 0.2rem;
+  color: rgba(255, 255, 255, 0.82);
 }
 
-.church-fund-item strong {
-  font-size: var(--text-lg);
+.church-report-row strong {
+  flex-shrink: 0;
+  text-align: right;
+  font-size: clamp(1rem, 3.8vw, 1.15rem);
   font-weight: var(--weight-semibold);
+  white-space: nowrap;
 }
 
-@media (min-width: 480px) {
-  .church-week-metrics {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-3);
-    padding-top: var(--space-4);
-    border-top: 1px solid rgba(255, 255, 255, 0.18);
+.church-report-asof {
+  color: rgba(255, 255, 255, 0.78);
+  margin-top: 1rem;
+}
+
+@media (max-width: 359px) {
+  .church-week-pair {
+    grid-template-columns: 1fr;
   }
 }
 
